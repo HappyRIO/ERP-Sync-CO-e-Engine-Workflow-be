@@ -336,6 +336,90 @@ export async function notifyJobAssignment(
 }
 
 /**
+ * Create notification for vehicle allocation (driver)
+ */
+export async function notifyVehicleAllocation(
+  vehicleId: string,
+  vehicleReg: string,
+  driverId: string,
+  tenantId: string
+) {
+  await createNotification(
+    driverId,
+    tenantId,
+    'info',
+    'Vehicle allocated',
+    `Vehicle ${vehicleReg} has been allocated to you`,
+    `/settings`,
+    vehicleId,
+    'vehicle'
+  );
+}
+
+/**
+ * Create notification for vehicle unallocation (driver)
+ */
+export async function notifyVehicleUnallocation(
+  vehicleId: string,
+  vehicleReg: string,
+  driverId: string,
+  tenantId: string
+) {
+  await createNotification(
+    driverId,
+    tenantId,
+    'warning',
+    'Vehicle unallocated',
+    `Vehicle ${vehicleReg} has been unallocated from you`,
+    `/settings`,
+    vehicleId,
+    'vehicle'
+  );
+}
+
+/**
+ * Create notification for vehicle reallocation (driver who lost the vehicle)
+ */
+export async function notifyVehicleReallocation(
+  vehicleId: string,
+  vehicleReg: string,
+  oldDriverId: string,
+  tenantId: string
+) {
+  await createNotification(
+    oldDriverId,
+    tenantId,
+    'warning',
+    'Vehicle reallocated',
+    `Vehicle ${vehicleReg} has been reallocated to another driver`,
+    `/settings`,
+    vehicleId,
+    'vehicle'
+  );
+}
+
+/**
+ * Create notification for job unassignment (driver)
+ */
+export async function notifyJobUnassignment(
+  jobId: string,
+  jobNumber: string,
+  driverId: string,
+  tenantId: string
+) {
+  await createNotification(
+    driverId,
+    tenantId,
+    'warning',
+    'Job unassigned',
+    `You have been unassigned from job ${jobNumber}`,
+    `/jobs/${jobId}`,
+    jobId,
+    'job'
+  );
+}
+
+/**
  * Create notification for pending approval (admin)
  */
 export async function notifyPendingApproval(

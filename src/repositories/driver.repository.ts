@@ -6,6 +6,7 @@ export class DriverRepository {
       where: { id, role: 'driver' },
       include: {
         driverProfile: true,
+        vehicle: true,
         tenant: true,
       },
     });
@@ -20,15 +21,13 @@ export class DriverRepository {
       },
       include: {
         driverProfile: true,
+        vehicle: true,
       },
       orderBy: { name: 'asc' },
     });
   }
 
   async createProfile(userId: string, data: {
-    vehicleReg: string;
-    vehicleType: string;
-    vehicleFuelType: string;
     phone?: string;
   }) {
     return prisma.driverProfile.upsert({
@@ -42,9 +41,6 @@ export class DriverRepository {
   }
 
   async updateProfile(userId: string, data: {
-    vehicleReg?: string;
-    vehicleType?: string;
-    vehicleFuelType?: string;
     phone?: string;
   }) {
     return prisma.driverProfile.update({

@@ -96,7 +96,12 @@ async function cleanupDatabase() {
     });
     console.log(`   ✅ Deleted ${deletedUsers.count} non-admin users\n`);
 
-    // Step 9: Delete all tenants except Reuse Connect ITAD Platform
+    // Step 9: Delete all vehicles (must be done before deleting admin users due to createdBy foreign key)
+    console.log('🚗 Deleting all vehicles...');
+    const deletedVehicles = await prisma.vehicle.deleteMany({});
+    console.log(`   ✅ Deleted ${deletedVehicles.count} vehicles\n`);
+
+    // Step 10: Delete all tenants except Reuse Connect ITAD Platform
     console.log('🏢 Deleting all tenants except Reuse Connect ITAD Platform...');
     const deletedTenants = await prisma.tenant.deleteMany({
       where: {
@@ -105,7 +110,7 @@ async function cleanupDatabase() {
     });
     console.log(`   ✅ Deleted ${deletedTenants.count} tenants\n`);
 
-    // Step 10: Delete all admin users (we'll recreate them)
+    // Step 11: Delete all admin users (we'll recreate them)
     console.log('👤 Deleting all admin users...');
     const deletedAdmins = await prisma.user.deleteMany({
       where: {
@@ -114,12 +119,12 @@ async function cleanupDatabase() {
     });
     console.log(`   ✅ Deleted ${deletedAdmins.count} admin users\n`);
 
-    // Step 11: Delete all asset categories (we'll recreate them)
+    // Step 12: Delete all asset categories (we'll recreate them)
     console.log('📦 Deleting all asset categories...');
     const deletedCategories = await prisma.assetCategory.deleteMany({});
     console.log(`   ✅ Deleted ${deletedCategories.count} asset categories\n`);
 
-    // Step 12: Ensure Reuse Connect ITAD Platform tenant exists and is properly configured
+    // Step 13: Ensure Reuse Connect ITAD Platform tenant exists and is properly configured
     console.log('🏢 Ensuring Reuse Connect ITAD Platform tenant exists...');
     const finalTenant = await prisma.tenant.upsert({
       where: { id: reuseTenantId },
@@ -140,7 +145,7 @@ async function cleanupDatabase() {
     });
     console.log(`   ✅ Reuse Connect ITAD Platform tenant ready: ${finalTenant.name} (${finalTenant.id})\n`);
 
-    // Step 13: Create admin user
+    // Step 14: Create admin user
     console.log('👤 Creating admin user...');
     const adminEmail = 'admin@reuse.com';
     const adminPassword = 'admin123';
@@ -172,7 +177,7 @@ async function cleanupDatabase() {
     console.log(`      Password: ${adminPassword}`);
     console.log(`      Name: ${admin.name}\n`);
 
-    // Step 14: Create 7 asset categories with complete buyback data
+    // Step 15: Create 7 asset categories with complete buyback data
     console.log('📦 Creating asset categories...');
     const categories = [
       {
@@ -273,6 +278,7 @@ async function cleanupDatabase() {
     console.log(`   - Bookings deleted: ${deletedBookings.count}`);
     console.log(`   - Jobs deleted: ${deletedJobs.count}`);
     console.log(`   - Driver profiles deleted: ${deletedDriverProfiles.count}`);
+    console.log(`   - Vehicles deleted: ${deletedVehicles.count}`);
     console.log(`   - Sites deleted: ${deletedSites.count}`);
     console.log(`   - Clients deleted: ${deletedClients.count}`);
     console.log(`   - Documents deleted: ${deletedDocuments.count}`);

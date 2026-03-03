@@ -74,10 +74,10 @@ export class BookingRepository {
 
   async update(id: string, data: {
     status?: BookingStatus;
-    driverId?: string;
-    driverName?: string;
-    scheduledBy?: string;
-    scheduledAt?: Date;
+    driverId?: string | null;
+    driverName?: string | null;
+    scheduledBy?: string | null;
+    scheduledAt?: Date | null;
     collectedAt?: Date;
     sanitisedAt?: Date;
     gradedAt?: Date;

@@ -28,14 +28,14 @@ export class JobService {
 
     const driver = await prisma.user.findUnique({
       where: { id: driverId },
-      include: { driverProfile: true },
+      include: { vehicle: true },
     });
 
     if (!driver || driver.role !== 'driver') {
       throw new NotFoundError('Driver', driverId);
     }
 
-    const vehicleFuelType = driver.driverProfile?.vehicleFuelType || booking.preferredVehicleType || 'van';
+    const vehicleFuelType = driver.vehicle?.vehicleFuelType || booking.preferredVehicleType || 'van';
     // Use 0 if distance is not available (instead of defaulting to 80km)
     // This allows proper error handling when distance calculation failed
     const roundTripDistanceKm = (booking.roundTripDistanceKm && booking.roundTripDistanceKm > 0) 
@@ -304,10 +304,14 @@ export class JobService {
                 email: true,
                 driverProfile: {
                   select: {
+                    phone: true,
+                  },
+                },
+                vehicle: {
+                  select: {
                     vehicleReg: true,
                     vehicleType: true,
                     vehicleFuelType: true,
-                    phone: true,
                   },
                 },
             },
@@ -426,10 +430,14 @@ export class JobService {
                 email: true,
                 driverProfile: {
                   select: {
+                    phone: true,
+                  },
+                },
+                vehicle: {
+                  select: {
                     vehicleReg: true,
                     vehicleType: true,
                     vehicleFuelType: true,
-                    phone: true,
                   },
                 },
               },
@@ -588,10 +596,14 @@ export class JobService {
                 email: true,
                 driverProfile: {
                   select: {
+                    phone: true,
+                  },
+                },
+                vehicle: {
+                  select: {
                     vehicleReg: true,
                     vehicleType: true,
                     vehicleFuelType: true,
-                    phone: true,
                   },
                 },
             },
@@ -713,10 +725,14 @@ export class JobService {
                 email: true,
                 driverProfile: {
                   select: {
+                    phone: true,
+                  },
+                },
+                vehicle: {
+                  select: {
                     vehicleReg: true,
                     vehicleType: true,
                     vehicleFuelType: true,
-                    phone: true,
                   },
                 },
             },
@@ -1297,5 +1313,175 @@ export class JobService {
     });
 
     return this.getJobById(job.id);
+  }
+
+  /**
+   * Re-assign driver to a job (admin only)
+   * Only allowed if job status is 'routed' (not 'en_route' or later)
+   */
+  async reassignDriver(jobId: string, newDriverId: string, changedBy: string) {
+    const job = await jobRepo.findById(jobId);
+    if (!job) {
+      throw new NotFoundError('Job', jobId);
+    }
+
+    // Only allow re-assignment if job status is 'routed'
+    if (job.status !== 'routed') {
+      throw new ValidationError(
+        `Cannot re-assign driver. Job status must be 'routed' to re-assign. Current status: ${job.status}`
+      );
+    }
+
+    // Verify new driver exists and is a driver
+    const newDriver = await prisma.user.findUnique({
+      where: { id: newDriverId },
+      include: { vehicle: true },
+    });
+
+    if (!newDriver || newDriver.role !== 'driver') {
+      throw new NotFoundError('Driver', newDriverId);
+    }
+
+    // Verify driver has a vehicle allocated
+    if (!newDriver.vehicle) {
+      throw new ValidationError('Cannot assign driver without an allocated vehicle');
+    }
+
+    // Get old driver ID for notification
+    const oldDriverId = job.driverId;
+
+    // Update job with new driver
+    await jobRepo.update(job.id, {
+      driverId: newDriverId,
+    });
+
+    // Add status history
+    await jobRepo.addStatusHistory(job.id, {
+      status: job.status,
+      changedBy: changedBy,
+      notes: `Driver re-assigned from ${job.driver?.name || 'previous driver'} to ${newDriver.name}`,
+    });
+
+    // Notify new driver
+    const { notifyJobStatusChange } = await import('../utils/notifications');
+    await notifyJobStatusChange(
+      job.id,
+      job.erpJobNumber,
+      job.status,
+      newDriverId,
+      job.tenantId,
+      'driver'
+    );
+
+    // Notify old driver if different
+    if (oldDriverId && oldDriverId !== newDriverId) {
+      await notifyJobStatusChange(
+        job.id,
+        job.erpJobNumber,
+        'cancelled', // Use cancelled status to indicate job was removed
+        oldDriverId,
+        job.tenantId,
+        'driver'
+      );
+    }
+
+    return this.getJobById(job.id);
+  }
+
+  /**
+   * Unassign driver from a job (admin only)
+   * Only allowed if job status is 'routed' (not 'en_route' or later)
+   */
+  async unassignDriver(jobId: string, changedBy: string) {
+    const job = await jobRepo.findById(jobId);
+    if (!job) {
+      throw new NotFoundError('Job', jobId);
+    }
+
+    // Only allow un-assignment if job status is 'routed'
+    if (job.status !== 'routed') {
+      throw new ValidationError(
+        `Cannot unassign driver. Job status must be 'routed' to unassign. Current status: ${job.status}`
+      );
+    }
+
+    if (!job.driverId) {
+      throw new ValidationError('Job does not have a driver assigned');
+    }
+
+    // Get old driver ID for notification
+    const oldDriverId = job.driverId;
+
+    // Determine target statuses when unassigning
+    // If job was routed, move it back to booked
+    const targetJobStatus: JobStatus | null = job.status === 'routed' ? 'booked' : null;
+
+    // If booking exists and was scheduled, move it back to created
+    const bookingId = job.bookingId;
+    const currentBookingStatus = job.booking?.status as BookingStatus | undefined;
+    const targetBookingStatus: BookingStatus | null =
+      currentBookingStatus === 'scheduled' ? 'created' : null;
+
+    // Update job to remove driver (and optionally revert status)
+    await jobRepo.update(job.id, {
+      driverId: null,
+      ...(targetJobStatus ? { status: targetJobStatus } : {}),
+    });
+
+    // If there is a related booking, clear its driver and optionally revert status
+    if (bookingId) {
+      await bookingRepo.update(bookingId, {
+        ...(targetBookingStatus ? { status: targetBookingStatus } : {}),
+        // Clear driver linkage from booking so UI no longer shows assigned driver
+        driverId: null as any,
+        driverName: null as any,
+        scheduledBy: null as any,
+        scheduledAt: null as any,
+      });
+
+      // Record booking status history if status was reverted
+      if (targetBookingStatus) {
+        await bookingRepo.addStatusHistory(bookingId, {
+          status: targetBookingStatus,
+          changedBy,
+          notes: 'Driver unassigned from job; booking returned to created status',
+        });
+      }
+    }
+
+    // Add status history
+    await jobRepo.addStatusHistory(job.id, {
+      status: targetJobStatus ?? job.status,
+      changedBy: changedBy,
+      notes: `Driver ${job.driver?.name || 'driver'} unassigned from job`,
+    });
+
+    // Notify old driver that they have been unassigned
+    const { notifyJobUnassignment } = await import('../utils/notifications');
+    await notifyJobUnassignment(
+      job.id,
+      job.erpJobNumber,
+      oldDriverId,
+      job.tenantId
+    );
+
+    return this.getJobById(job.id);
+  }
+
+  /**
+   * Check if driver has any active jobs (status 'routed' or later, not 'completed' or 'cancelled')
+   */
+  async hasActiveJobs(driverId: string): Promise<boolean> {
+    const activeJob = await prisma.job.findFirst({
+      where: {
+        driverId: driverId,
+        status: {
+          in: ['routed', 'en_route', 'arrived', 'collected', 'warehouse', 'sanitised', 'graded'],
+        },
+      },
+      select: { id: true },
+    });
+
+    return !!activeJob;
   }
 }

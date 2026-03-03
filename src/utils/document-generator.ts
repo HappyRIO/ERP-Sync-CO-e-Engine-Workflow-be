@@ -737,7 +737,7 @@ export async function prepareChainOfCustodyData(
   const driverName = driver?.name || booking?.driverName || '';
 
   // Get vehicle registration from driver profile
-  const vehicleReg = driver?.driverProfile?.vehicleReg || '';
+  const vehicleReg = driver?.vehicle?.vehicleReg || '';
 
   // Get site information
   const siteName = booking?.siteName || site?.name || '';

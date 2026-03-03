@@ -30,6 +30,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -64,6 +65,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -98,6 +100,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -134,6 +137,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -146,7 +150,7 @@ export class JobRepository {
     co2eSaved?: number;
     travelEmissions?: number;
     buybackValue?: number;
-    driverId?: string;
+    driverId?: string | null;
     dial2Collection?: string;
     securityRequirements?: string;
     idRequired?: string;
@@ -172,6 +176,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -223,6 +228,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },
@@ -273,6 +279,7 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
+            vehicle: true,
           },
         },
       },

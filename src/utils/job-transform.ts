@@ -124,14 +124,24 @@ export function transformJobForAPI(job: any): TransformedJob {
       gradingRecordId: asset.gradingRecordId,
       resaleValue: asset.resaleValue,
     })),
-    driver: job.driver ? (() => {
+    // Prefer full driver relation; if missing but booking has driver info, fall back to booking driver
+    driver: (job.driver || job.booking?.driverId) ? (() => {
+      const baseDriver = job.driver || {
+        id: job.booking?.driverId,
+        name: job.booking?.driverName || 'Assigned driver',
+        driverProfile: null,
+        vehicle: null,
+        phone: null,
+        email: null,
+      };
+
       const driverData = {
-        id: job.driver.id,
-        name: job.driver.name,
-        vehicleReg: job.driver.driverProfile?.vehicleReg ?? 'N/A',
-        vehicleType: (job.driver.driverProfile?.vehicleType ?? 'van') as 'van' | 'truck' | 'car',
-        vehicleFuelType: (job.driver.driverProfile?.vehicleFuelType ?? 'diesel') as 'petrol' | 'diesel' | 'electric',
-        phone: job.driver.driverProfile?.phone ?? job.driver.phone ?? job.driver.email ?? 'N/A',
+        id: baseDriver.id,
+        name: baseDriver.name,
+        vehicleReg: baseDriver.vehicle?.vehicleReg ?? 'N/A',
+        vehicleType: (baseDriver.vehicle?.vehicleType ?? 'van') as 'van' | 'truck' | 'car',
+        vehicleFuelType: (baseDriver.vehicle?.vehicleFuelType ?? 'diesel') as 'petrol' | 'diesel' | 'electric',
+        phone: baseDriver.driverProfile?.phone ?? baseDriver.phone ?? baseDriver.email ?? 'N/A',
       };
 
       let eta: string | undefined;

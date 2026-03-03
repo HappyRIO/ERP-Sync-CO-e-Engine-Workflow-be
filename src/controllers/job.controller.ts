@@ -8,6 +8,50 @@ import { logger } from '../utils/logger';
 const jobService = new JobService();
 
 export class JobController {
+  async reassignDriver(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      // Only admin can re-assign drivers
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only administrators can re-assign drivers',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const { driverId } = req.body;
+
+      // If driverId is null, undefined, or empty, unassign the driver
+      if (!driverId || driverId === '' || driverId === null) {
+        const job = await jobService.unassignDriver(id, req.user.userId);
+        const transformedJob = transformJobForAPI(job as any);
+        const jobWithPresignedUrls = await processEvidenceUrls(transformedJob);
+
+        return res.json({
+          success: true,
+          data: jobWithPresignedUrls,
+        } as ApiResponse);
+      }
+
+      const job = await jobService.reassignDriver(id, driverId, req.user.userId);
+      const transformedJob = transformJobForAPI(job as any);
+      const jobWithPresignedUrls = await processEvidenceUrls(transformedJob);
+
+      return res.json({
+        success: true,
+        data: jobWithPresignedUrls,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
   async getById(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

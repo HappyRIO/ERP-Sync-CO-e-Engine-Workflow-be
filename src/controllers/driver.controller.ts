@@ -1,8 +1,10 @@
 import { Response, NextFunction } from 'express';
 import { DriverService } from '../services/driver.service';
+import { VehicleService } from '../services/vehicle.service';
 import { AuthenticatedRequest, ApiResponse } from '../types';
 
 const driverService = new DriverService();
+const vehicleService = new VehicleService();
 
 export class DriverController {
   async list(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -16,18 +18,28 @@ export class DriverController {
 
       const drivers = await driverService.getDrivers(req.user.tenantId);
 
-      // Transform drivers to include profile data
-      const transformedDrivers = drivers.map(driver => ({
-        id: driver.id,
-        name: driver.name,
-        email: driver.email,
-        phone: driver.phone,
-        status: driver.status,
-        vehicleReg: driver.driverProfile?.vehicleReg || 'N/A',
-        vehicleType: driver.driverProfile?.vehicleType || 'van',
-        vehicleFuelType: driver.driverProfile?.vehicleFuelType || 'diesel',
-        hasProfile: !!driver.driverProfile,
-      }));
+      // Fetch all vehicles for the tenant to map to drivers
+      const vehicles = await vehicleService.getVehicles(req.user.tenantId);
+
+      // Transform drivers to include profile data and vehicle information
+      const transformedDrivers = await Promise.all(
+        drivers.map(async (driver) => {
+          const vehicle = driver.vehicle || vehicles.find((v) => v.driverId === driver.id);
+          return {
+            id: driver.id,
+            name: driver.name,
+            email: driver.email,
+            phone: driver.phone || driver.driverProfile?.phone || '',
+            status: driver.status,
+            vehicleId: vehicle?.id || null,
+            vehicleReg: vehicle?.vehicleReg || null,
+            vehicleType: vehicle?.vehicleType || null,
+            vehicleFuelType: vehicle?.vehicleFuelType || null,
+            hasVehicle: !!vehicle,
+            hasProfile: !!driver.driverProfile,
+          };
+        })
+      );
 
       return res.json({
         success: true,
@@ -59,11 +71,8 @@ export class DriverController {
 
       const driver = await driverService.getDriverById(id);
 
-      // If no profile exists yet, return empty strings so the UI shows empty fields
-      const hasProfile =
-        !!driver.driverProfile &&
-        !!driver.driverProfile.vehicleReg &&
-        driver.driverProfile.vehicleReg.trim().toUpperCase() !== 'TBD';
+      // Get vehicle allocated to this driver
+      const vehicle = driver.vehicle || (await vehicleService.getVehicleByDriver(id));
 
       return res.json({
         success: true,
@@ -71,12 +80,14 @@ export class DriverController {
           id: driver.id,
           name: driver.name,
           email: driver.email,
-          phone: hasProfile ? (driver.driverProfile?.phone || driver.phone || '') : '',
+          phone: driver.driverProfile?.phone || driver.phone || '',
           status: driver.status,
-          vehicleReg: hasProfile ? (driver.driverProfile?.vehicleReg || '') : '',
-          vehicleType: hasProfile ? (driver.driverProfile?.vehicleType || 'van') : 'van',
-          vehicleFuelType: hasProfile ? (driver.driverProfile?.vehicleFuelType || 'diesel') : 'diesel',
-          hasProfile,
+          vehicleId: vehicle?.id || null,
+          vehicleReg: vehicle?.vehicleReg || null,
+          vehicleType: vehicle?.vehicleType || null,
+          vehicleFuelType: vehicle?.vehicleFuelType || null,
+          hasVehicle: !!vehicle,
+          hasProfile: !!driver.driverProfile,
         },
       } as ApiResponse);
     } catch (error) {
@@ -93,34 +104,25 @@ export class DriverController {
         } as ApiResponse);
       }
 
-      const { userId, name, email, vehicleReg, vehicleType, vehicleFuelType, phone } = req.body;
+      const { userId, name, email, phone } = req.body;
 
       // Only admin can create profiles for other users
-      // Drivers can create their own profile
-      let profile;
-      if (req.user.role === 'admin') {
-        // Admin can create profiles with name/email or userId
-        // Pass the admin's user ID so invitation can be created with correct inviter
-        profile = await driverService.createOrUpdateProfile(req.user.tenantId, {
-          userId,
-          name,
-          email,
-          vehicleReg,
-          vehicleType,
-          vehicleFuelType,
-          phone,
-          invitedBy: req.user.userId, // Pass admin user ID for invitation creation
-        });
-      } else {
-        // Drivers can only create their own profile
-        profile = await driverService.createOrUpdateProfile(req.user.tenantId, {
-          userId: req.user.userId,
-          vehicleReg,
-          vehicleType,
-          vehicleFuelType,
-          phone,
-        });
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only administrators can create driver profiles',
+        } as ApiResponse);
       }
+
+      // Admin can create profiles with name/email or userId
+      // Pass the admin's user ID so invitation can be created with correct inviter
+      const profile = await driverService.createOrUpdateProfile(req.user.tenantId, {
+        userId,
+        name,
+        email,
+        phone,
+        invitedBy: req.user.userId, // Pass admin user ID for invitation creation
+      });
 
       return res.status(201).json({
         success: true,
@@ -141,18 +143,26 @@ export class DriverController {
       }
 
       const { id } = req.params;
-      const { name, email, vehicleReg, vehicleType, vehicleFuelType, phone } = req.body;
+      const { name, email, phone } = req.body;
 
-      // Only admin can update other users' profiles
-      // Drivers can update their own profile
-      const targetUserId = req.user.role === 'admin' ? id : req.user.userId;
+      // Drivers can only update their own profile
+      if (req.user.role === 'driver' && req.user.userId !== id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Drivers can only update their own profile',
+        } as ApiResponse);
+      }
+      // Admins can update any driver profile
+      if (req.user.role !== 'admin' && req.user.userId !== id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only administrators can update other driver profiles',
+        } as ApiResponse);
+      }
 
-      const profile = await driverService.updateProfile(targetUserId, {
+      const profile = await driverService.updateProfile(id, {
         name,
         email,
-        vehicleReg,
-        vehicleType,
-        vehicleFuelType,
         phone,
       });
 

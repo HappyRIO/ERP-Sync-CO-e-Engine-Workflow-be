@@ -35,17 +35,10 @@ export class DriverService {
       userId?: string;
       name?: string;
       email?: string;
-      vehicleReg: string;
-      vehicleType: 'van' | 'truck' | 'car';
-      vehicleFuelType: 'petrol' | 'diesel' | 'electric';
       phone?: string;
       invitedBy?: string; // Admin user ID who is creating this profile
     }
   ) {
-    // Disallow placeholder or empty vehicle registrations
-    if (!data.vehicleReg || !data.vehicleReg.trim() || data.vehicleReg.trim().toUpperCase() === 'TBD') {
-      throw new ValidationError('Vehicle registration number is required and cannot be a placeholder.');
-    }
     let userId: string;
 
     if (data.userId) {
@@ -173,22 +166,7 @@ export class DriverService {
       throw new ValidationError('User must have driver role to create driver profile');
     }
 
-    // Validate vehicle type
-    const validVehicleTypes = ['van', 'truck', 'car'];
-    if (!validVehicleTypes.includes(data.vehicleType)) {
-      throw new ValidationError(`Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`);
-    }
-
-    // Validate fuel type
-    const validFuelTypes = ['petrol', 'diesel', 'electric'];
-    if (!validFuelTypes.includes(data.vehicleFuelType)) {
-      throw new ValidationError(`Invalid fuel type. Must be one of: ${validFuelTypes.join(', ')}`);
-    }
-
     return driverRepo.createProfile(userId, {
-      vehicleReg: data.vehicleReg,
-      vehicleType: data.vehicleType,
-      vehicleFuelType: data.vehicleFuelType,
       phone: data.phone,
     });
   }
@@ -201,9 +179,6 @@ export class DriverService {
     data: {
       name?: string;
       email?: string;
-      vehicleReg?: string;
-      vehicleType?: 'van' | 'truck' | 'car';
-      vehicleFuelType?: 'petrol' | 'diesel' | 'electric';
       phone?: string;
     }
   ) {
@@ -213,9 +188,9 @@ export class DriverService {
 
     // If profile does not exist yet, create it instead of failing
     if (!profile) {
-      if (!data.name || !data.email || !data.phone || !data.vehicleReg || !data.vehicleType || !data.vehicleFuelType) {
+      if (!data.name || !data.email || !data.phone) {
         throw new ValidationError(
-          'To create your driver profile, please provide name, email, phone number, vehicle registration, vehicle type, and fuel type.'
+          'To create your driver profile, please provide name, email, and phone number.'
         );
       }
 
@@ -223,21 +198,6 @@ export class DriverService {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(data.email.trim())) {
         throw new ValidationError('Invalid email format');
-      }
-
-      const vehicleReg = data.vehicleReg.trim().toUpperCase();
-      if (vehicleReg === 'TBD') {
-        throw new ValidationError('Vehicle registration number cannot be a placeholder.');
-      }
-
-      const validVehicleTypes = ['van', 'truck', 'car'] as const;
-      if (!validVehicleTypes.includes(data.vehicleType)) {
-        throw new ValidationError(`Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`);
-      }
-
-      const validFuelTypes = ['petrol', 'diesel', 'electric'] as const;
-      if (!validFuelTypes.includes(data.vehicleFuelType)) {
-        throw new ValidationError(`Invalid fuel type. Must be one of: ${validFuelTypes.join(', ')}`);
       }
 
       // Update user name and email
@@ -250,9 +210,6 @@ export class DriverService {
       });
 
       return driverRepo.createProfile(userId, {
-        vehicleReg,
-        vehicleType: data.vehicleType,
-        vehicleFuelType: data.vehicleFuelType,
         phone: data.phone,
       });
     }
@@ -263,26 +220,6 @@ export class DriverService {
     }
     if (data.phone !== undefined && !data.phone.trim()) {
       throw new ValidationError('Phone number is required');
-    }
-
-    // Validate if provided on update
-    if (data.vehicleType) {
-      const validVehicleTypes = ['van', 'truck', 'car'] as const;
-      if (!validVehicleTypes.includes(data.vehicleType)) {
-        throw new ValidationError(`Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`);
-      }
-    }
-
-    if (data.vehicleFuelType) {
-      const validFuelTypes = ['petrol', 'diesel', 'electric'] as const;
-      if (!validFuelTypes.includes(data.vehicleFuelType)) {
-        throw new ValidationError(`Invalid fuel type. Must be one of: ${validFuelTypes.join(', ')}`);
-      }
-    }
-
-    // Prevent placeholder vehicle registrations
-    if (data.vehicleReg && data.vehicleReg.trim().toUpperCase() === 'TBD') {
-      throw new ValidationError('Vehicle registration number cannot be a placeholder.');
     }
 
     // Update user name and email if provided
@@ -301,9 +238,6 @@ export class DriverService {
     }
 
     return driverRepo.updateProfile(userId, {
-      vehicleReg: data.vehicleReg ? data.vehicleReg.trim().toUpperCase() : undefined,
-      vehicleType: data.vehicleType,
-      vehicleFuelType: data.vehicleFuelType,
       phone: data.phone,
     });
   }

@@ -2,13 +2,13 @@
 CREATE TYPE "UserRole" AS ENUM ('admin', 'client', 'reseller', 'driver');
 
 -- CreateEnum
-CREATE TYPE "UserStatus" AS ENUM ('pending', 'active', 'inactive');
+CREATE TYPE "UserStatus" AS ENUM ('pending', 'active', 'inactive', 'declined');
 
 -- CreateEnum
 CREATE TYPE "ClientStatus" AS ENUM ('active', 'inactive', 'pending');
 
 -- CreateEnum
-CREATE TYPE "BookingStatus" AS ENUM ('created', 'scheduled', 'collected', 'sanitised', 'graded', 'completed', 'cancelled');
+CREATE TYPE "BookingStatus" AS ENUM ('pending', 'created', 'scheduled', 'collected', 'sanitised', 'graded', 'completed', 'cancelled');
 
 -- CreateEnum
 CREATE TYPE "JobStatus" AS ENUM ('booked', 'routed', 'en_route', 'arrived', 'collected', 'warehouse', 'sanitised', 'graded', 'completed', 'cancelled');
@@ -17,10 +17,7 @@ CREATE TYPE "JobStatus" AS ENUM ('booked', 'routed', 'en_route', 'arrived', 'col
 CREATE TYPE "CertificateType" AS ENUM ('chain_of_custody', 'data_wipe', 'destruction', 'recycling', 'esg_report');
 
 -- CreateEnum
-CREATE TYPE "InvoiceStatus" AS ENUM ('draft', 'sent', 'paid', 'overdue', 'cancelled');
-
--- CreateEnum
-CREATE TYPE "CommissionStatus" AS ENUM ('pending', 'approved', 'paid');
+CREATE TYPE "NotificationType" AS ENUM ('success', 'warning', 'info', 'error');
 
 -- CreateTable
 CREATE TABLE "User" (
@@ -32,6 +29,7 @@ CREATE TABLE "User" (
     "status" "UserStatus" NOT NULL DEFAULT 'pending',
     "tenantId" TEXT NOT NULL,
     "avatar" TEXT,
+    "phone" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -61,6 +59,9 @@ CREATE TABLE "Client" (
     "name" TEXT NOT NULL,
     "email" TEXT,
     "phone" TEXT,
+    "organisationName" TEXT,
+    "registrationNumber" TEXT,
+    "address" TEXT,
     "status" "ClientStatus" NOT NULL DEFAULT 'active',
     "resellerId" TEXT,
     "resellerName" TEXT,
@@ -96,6 +97,10 @@ CREATE TABLE "AssetCategory" (
     "co2ePerUnit" DOUBLE PRECISION NOT NULL,
     "avgWeight" DOUBLE PRECISION NOT NULL,
     "avgBuybackValue" DOUBLE PRECISION NOT NULL,
+    "avgRRP" DOUBLE PRECISION,
+    "residualLow" DOUBLE PRECISION,
+    "buybackFloor" DOUBLE PRECISION,
+    "buybackCap" DOUBLE PRECISION,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -115,7 +120,7 @@ CREATE TABLE "Booking" (
     "lat" DOUBLE PRECISION,
     "lng" DOUBLE PRECISION,
     "scheduledDate" TIMESTAMP(3) NOT NULL,
-    "status" "BookingStatus" NOT NULL DEFAULT 'created',
+    "status" "BookingStatus" NOT NULL DEFAULT 'pending',
     "charityPercent" INTEGER NOT NULL DEFAULT 0,
     "estimatedCO2e" DOUBLE PRECISION NOT NULL,
     "estimatedBuyback" DOUBLE PRECISION NOT NULL,
@@ -177,11 +182,20 @@ CREATE TABLE "Job" (
     "status" "JobStatus" NOT NULL DEFAULT 'booked',
     "scheduledDate" TIMESTAMP(3) NOT NULL,
     "completedDate" TIMESTAMP(3),
+    "estimatedArrival" TIMESTAMP(3),
     "co2eSaved" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "travelEmissions" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "buybackValue" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "charityPercent" INTEGER NOT NULL DEFAULT 0,
     "driverId" TEXT,
+    "dial2Collection" TEXT,
+    "securityRequirements" TEXT,
+    "idRequired" TEXT,
+    "loadingBayLocation" TEXT,
+    "vehicleHeightRestrictions" TEXT,
+    "doorLiftSize" TEXT,
+    "roadWorksPublicEvents" TEXT,
+    "manualHandlingRequirements" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -222,10 +236,52 @@ CREATE TABLE "JobStatusHistory" (
 );
 
 -- CreateTable
+CREATE TABLE "Vehicle" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "vehicleReg" TEXT NOT NULL,
+    "vehicleType" TEXT NOT NULL,
+    "vehicleFuelType" TEXT NOT NULL,
+    "driverId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdBy" TEXT NOT NULL,
+
+    CONSTRAINT "Vehicle_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "DriverProfile" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "phone" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "DriverProfile_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "OrganisationProfile" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "organisationName" TEXT NOT NULL,
+    "registrationNumber" TEXT NOT NULL,
+    "address" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "OrganisationProfile_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Evidence" (
     "id" TEXT NOT NULL,
     "jobId" TEXT NOT NULL,
-    "uploadedBy" TEXT NOT NULL,
+    "status" "JobStatus" NOT NULL,
+    "uploadedBy" TEXT,
     "photos" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "signature" TEXT,
     "sealNumbers" TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -287,6 +343,20 @@ CREATE TABLE "BuybackResult" (
 );
 
 -- CreateTable
+CREATE TABLE "BuybackConfig" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "volumeFactor10" DOUBLE PRECISION NOT NULL DEFAULT 1.03,
+    "volumeFactor50" DOUBLE PRECISION NOT NULL DEFAULT 1.06,
+    "volumeFactor200" DOUBLE PRECISION NOT NULL DEFAULT 1.10,
+    "ageFactor" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "conditionFactor" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "marketFactor" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "BuybackConfig_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "FinanceStatus" (
     "id" TEXT NOT NULL,
     "jobId" TEXT NOT NULL,
@@ -314,7 +384,7 @@ CREATE TABLE "Document" (
     "filePath" TEXT NOT NULL,
     "fileSize" INTEGER NOT NULL,
     "mimeType" TEXT NOT NULL,
-    "uploadedBy" TEXT NOT NULL,
+    "uploadedBy" TEXT,
     "metadata" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -339,47 +409,34 @@ CREATE TABLE "Invite" (
 );
 
 -- CreateTable
-CREATE TABLE "Invoice" (
+CREATE TABLE "Notification" (
     "id" TEXT NOT NULL,
-    "invoiceNumber" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "bookingId" TEXT,
-    "jobId" TEXT,
-    "erpJobNumber" TEXT,
-    "issueDate" TIMESTAMP(3) NOT NULL,
-    "dueDate" TIMESTAMP(3) NOT NULL,
-    "amount" DOUBLE PRECISION NOT NULL,
-    "status" "InvoiceStatus" NOT NULL DEFAULT 'draft',
-    "items" TEXT NOT NULL,
-    "subtotal" DOUBLE PRECISION NOT NULL,
-    "tax" DOUBLE PRECISION NOT NULL,
-    "total" DOUBLE PRECISION NOT NULL,
-    "downloadUrl" TEXT,
+    "userId" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "type" "NotificationType" NOT NULL,
+    "title" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "read" BOOLEAN NOT NULL DEFAULT false,
+    "url" TEXT,
+    "relatedId" TEXT,
+    "relatedType" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "readAt" TIMESTAMP(3),
 
-    CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "Commission" (
+CREATE TABLE "TwoFactorCode" (
     "id" TEXT NOT NULL,
-    "resellerId" TEXT NOT NULL,
-    "resellerName" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "bookingId" TEXT,
-    "jobId" TEXT,
-    "jobNumber" TEXT,
-    "bookingNumber" TEXT,
-    "commissionPercent" INTEGER NOT NULL,
-    "jobValue" DOUBLE PRECISION NOT NULL,
-    "commissionAmount" DOUBLE PRECISION NOT NULL,
-    "status" "CommissionStatus" NOT NULL DEFAULT 'pending',
-    "period" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "used" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Commission_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "TwoFactorCode_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -437,6 +494,15 @@ CREATE INDEX "Booking_scheduledDate_idx" ON "Booking"("scheduledDate");
 CREATE INDEX "Booking_erpJobNumber_idx" ON "Booking"("erpJobNumber");
 
 -- CreateIndex
+CREATE INDEX "Booking_clientId_status_idx" ON "Booking"("clientId", "status");
+
+-- CreateIndex
+CREATE INDEX "Booking_tenantId_scheduledDate_idx" ON "Booking"("tenantId", "scheduledDate");
+
+-- CreateIndex
+CREATE INDEX "Booking_status_scheduledDate_idx" ON "Booking"("status", "scheduledDate");
+
+-- CreateIndex
 CREATE INDEX "BookingAsset_bookingId_idx" ON "BookingAsset"("bookingId");
 
 -- CreateIndex
@@ -473,6 +539,15 @@ CREATE INDEX "Job_scheduledDate_idx" ON "Job"("scheduledDate");
 CREATE INDEX "Job_erpJobNumber_idx" ON "Job"("erpJobNumber");
 
 -- CreateIndex
+CREATE INDEX "Job_status_scheduledDate_idx" ON "Job"("status", "scheduledDate");
+
+-- CreateIndex
+CREATE INDEX "Job_driverId_status_idx" ON "Job"("driverId", "status");
+
+-- CreateIndex
+CREATE INDEX "Job_tenantId_createdAt_idx" ON "Job"("tenantId", "createdAt");
+
+-- CreateIndex
 CREATE INDEX "JobAsset_jobId_idx" ON "JobAsset"("jobId");
 
 -- CreateIndex
@@ -485,10 +560,43 @@ CREATE INDEX "JobStatusHistory_jobId_idx" ON "JobStatusHistory"("jobId");
 CREATE INDEX "JobStatusHistory_createdAt_idx" ON "JobStatusHistory"("createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Evidence_jobId_key" ON "Evidence"("jobId");
+CREATE UNIQUE INDEX "Vehicle_vehicleReg_key" ON "Vehicle"("vehicleReg");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Vehicle_driverId_key" ON "Vehicle"("driverId");
+
+-- CreateIndex
+CREATE INDEX "Vehicle_tenantId_idx" ON "Vehicle"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "Vehicle_driverId_idx" ON "Vehicle"("driverId");
+
+-- CreateIndex
+CREATE INDEX "Vehicle_vehicleReg_idx" ON "Vehicle"("vehicleReg");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "DriverProfile_userId_key" ON "DriverProfile"("userId");
+
+-- CreateIndex
+CREATE INDEX "DriverProfile_userId_idx" ON "DriverProfile"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "OrganisationProfile_userId_key" ON "OrganisationProfile"("userId");
+
+-- CreateIndex
+CREATE INDEX "OrganisationProfile_userId_idx" ON "OrganisationProfile"("userId");
 
 -- CreateIndex
 CREATE INDEX "Evidence_jobId_idx" ON "Evidence"("jobId");
+
+-- CreateIndex
+CREATE INDEX "Evidence_status_idx" ON "Evidence"("status");
+
+-- CreateIndex
+CREATE INDEX "Evidence_uploadedBy_idx" ON "Evidence"("uploadedBy");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Evidence_jobId_status_key" ON "Evidence"("jobId", "status");
 
 -- CreateIndex
 CREATE INDEX "Certificate_jobId_idx" ON "Certificate"("jobId");
@@ -536,28 +644,31 @@ CREATE INDEX "Invite_token_idx" ON "Invite"("token");
 CREATE INDEX "Invite_tenantId_idx" ON "Invite"("tenantId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Invoice_invoiceNumber_key" ON "Invoice"("invoiceNumber");
+CREATE INDEX "Notification_userId_idx" ON "Notification"("userId");
 
 -- CreateIndex
-CREATE INDEX "Invoice_clientId_idx" ON "Invoice"("clientId");
+CREATE INDEX "Notification_tenantId_idx" ON "Notification"("tenantId");
 
 -- CreateIndex
-CREATE INDEX "Invoice_bookingId_idx" ON "Invoice"("bookingId");
+CREATE INDEX "Notification_read_idx" ON "Notification"("read");
 
 -- CreateIndex
-CREATE INDEX "Invoice_status_idx" ON "Invoice"("status");
+CREATE INDEX "Notification_createdAt_idx" ON "Notification"("createdAt");
 
 -- CreateIndex
-CREATE INDEX "Commission_resellerId_idx" ON "Commission"("resellerId");
+CREATE INDEX "Notification_userId_read_idx" ON "Notification"("userId", "read");
 
 -- CreateIndex
-CREATE INDEX "Commission_clientId_idx" ON "Commission"("clientId");
+CREATE INDEX "TwoFactorCode_userId_idx" ON "TwoFactorCode"("userId");
 
 -- CreateIndex
-CREATE INDEX "Commission_status_idx" ON "Commission"("status");
+CREATE INDEX "TwoFactorCode_code_idx" ON "TwoFactorCode"("code");
 
 -- CreateIndex
-CREATE INDEX "Commission_period_idx" ON "Commission"("period");
+CREATE INDEX "TwoFactorCode_expiresAt_idx" ON "TwoFactorCode"("expiresAt");
+
+-- CreateIndex
+CREATE INDEX "TwoFactorCode_userId_used_idx" ON "TwoFactorCode"("userId", "used");
 
 -- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -614,10 +725,25 @@ ALTER TABLE "JobAsset" ADD CONSTRAINT "JobAsset_categoryId_fkey" FOREIGN KEY ("c
 ALTER TABLE "JobStatusHistory" ADD CONSTRAINT "JobStatusHistory_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Vehicle" ADD CONSTRAINT "Vehicle_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Vehicle" ADD CONSTRAINT "Vehicle_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Vehicle" ADD CONSTRAINT "Vehicle_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "DriverProfile" ADD CONSTRAINT "DriverProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OrganisationProfile" ADD CONSTRAINT "OrganisationProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Evidence" ADD CONSTRAINT "Evidence_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Evidence" ADD CONSTRAINT "Evidence_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Evidence" ADD CONSTRAINT "Evidence_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Certificate" ADD CONSTRAINT "Certificate_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -635,22 +761,22 @@ ALTER TABLE "FinanceStatus" ADD CONSTRAINT "FinanceStatus_jobId_fkey" FOREIGN KE
 ALTER TABLE "Document" ADD CONSTRAINT "Document_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Document" ADD CONSTRAINT "Document_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "Job"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Document" ADD CONSTRAINT "Document_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Document" ADD CONSTRAINT "Document_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Document" ADD CONSTRAINT "Document_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Invite" ADD CONSTRAINT "Invite_invitedBy_fkey" FOREIGN KEY ("invitedBy") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Commission" ADD CONSTRAINT "Commission_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Commission" ADD CONSTRAINT "Commission_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "TwoFactorCode" ADD CONSTRAINT "TwoFactorCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

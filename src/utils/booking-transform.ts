@@ -1,7 +1,7 @@
 // Transform database booking format to API response format
 // Maps Prisma booking model to frontend-expected format
 
-import { BookingStatus } from '../types';
+import { BookingStatus, JobStatus } from '../types';
 
 export interface TransformedBooking {
   id: string;
@@ -24,6 +24,7 @@ export interface TransformedBooking {
   roundTripDistanceKm?: number;
   roundTripDistanceMiles?: number;
   jobId?: string;
+  jobStatus?: string;
   driverId?: string;
   driverName?: string;
   createdBy?: string;
@@ -44,8 +45,8 @@ export interface TransformedBooking {
 }
 
 /**
- * Transform booking status from backend format to frontend format
- */
+* Transform booking status from backend format to frontend format
+*/
 function transformStatus(status: BookingStatus): string {
   const statusMap: Record<BookingStatus, string> = {
     'pending': 'pending',
@@ -58,6 +59,27 @@ function transformStatus(status: BookingStatus): string {
     'cancelled': 'cancelled',
   };
   
+  return statusMap[status] || status;
+}
+
+/**
+ * Transform job status from backend format to frontend format
+ * (mirrors mapping in job-transform.ts)
+ */
+function transformJobStatus(status: JobStatus): string {
+  const statusMap: Record<JobStatus, string> = {
+    'booked': 'booked',
+    'routed': 'routed',
+    'en_route': 'en-route',
+    'arrived': 'arrived',
+    'collected': 'collected',
+    'warehouse': 'warehouse',
+    'sanitised': 'sanitised',
+    'graded': 'graded',
+    'completed': 'completed',
+    'cancelled': 'cancelled',
+  };
+
   return statusMap[status] || status;
 }
 
@@ -90,6 +112,7 @@ export function transformBookingForAPI(booking: any): TransformedBooking {
     roundTripDistanceKm: booking.roundTripDistanceKm,
     roundTripDistanceMiles: booking.roundTripDistanceMiles,
     jobId: booking.jobId,
+    jobStatus: booking.job ? transformJobStatus(booking.job.status) : undefined,
     driverId: booking.driverId,
     driverName: booking.driverName,
     createdBy: booking.createdBy,
