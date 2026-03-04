@@ -18,24 +18,25 @@ export class DriverController {
 
       const drivers = await driverService.getDrivers(req.user.tenantId);
 
-      // Fetch all vehicles for the tenant to map to drivers
-      const vehicles = await vehicleService.getVehicles(req.user.tenantId);
-
       // Transform drivers to include profile data and vehicle information
       const transformedDrivers = await Promise.all(
         drivers.map(async (driver) => {
-          const vehicle = driver.vehicle || vehicles.find((v) => v.driverId === driver.id);
+          // Get all vehicles for this driver
+          const driverVehicles = await vehicleService.getVehicleByDriver(driver.id);
+          const firstVehicle = driverVehicles?.[0] || null;
+          
           return {
             id: driver.id,
             name: driver.name,
             email: driver.email,
             phone: driver.phone || driver.driverProfile?.phone || '',
             status: driver.status,
-            vehicleId: vehicle?.id || null,
-            vehicleReg: vehicle?.vehicleReg || null,
-            vehicleType: vehicle?.vehicleType || null,
-            vehicleFuelType: vehicle?.vehicleFuelType || null,
-            hasVehicle: !!vehicle,
+            vehicleId: firstVehicle?.id || null,
+            vehicleReg: firstVehicle?.vehicleReg || null,
+            vehicleType: firstVehicle?.vehicleType || null,
+            vehicleFuelType: firstVehicle?.vehicleFuelType || null,
+            vehicles: driverVehicles || [], // Include all vehicles
+            hasVehicle: driverVehicles && driverVehicles.length > 0,
             hasProfile: !!driver.driverProfile,
           };
         })
@@ -71,8 +72,9 @@ export class DriverController {
 
       const driver = await driverService.getDriverById(id);
 
-      // Get vehicle allocated to this driver
-      const vehicle = driver.vehicle || (await vehicleService.getVehicleByDriver(id));
+      // Get all vehicles allocated to this driver
+      const vehicles = await vehicleService.getVehicleByDriver(id);
+      const firstVehicle = vehicles?.[0] || null;
 
       return res.json({
         success: true,
@@ -82,11 +84,12 @@ export class DriverController {
           email: driver.email,
           phone: driver.driverProfile?.phone || driver.phone || '',
           status: driver.status,
-          vehicleId: vehicle?.id || null,
-          vehicleReg: vehicle?.vehicleReg || null,
-          vehicleType: vehicle?.vehicleType || null,
-          vehicleFuelType: vehicle?.vehicleFuelType || null,
-          hasVehicle: !!vehicle,
+          vehicleId: firstVehicle?.id || null,
+          vehicleReg: firstVehicle?.vehicleReg || null,
+          vehicleType: firstVehicle?.vehicleType || null,
+          vehicleFuelType: firstVehicle?.vehicleFuelType || null,
+          vehicles: vehicles || [], // Include all vehicles
+          hasVehicle: vehicles && vehicles.length > 0,
           hasProfile: !!driver.driverProfile,
         },
       } as ApiResponse);

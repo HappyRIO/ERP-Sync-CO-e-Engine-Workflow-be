@@ -30,7 +30,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -65,7 +69,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -100,7 +108,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -137,7 +149,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -176,7 +192,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -228,7 +248,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },
@@ -279,7 +303,11 @@ export class JobRepository {
         driver: {
           include: {
             driverProfile: true,
-            vehicle: true,
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
           },
         },
       },

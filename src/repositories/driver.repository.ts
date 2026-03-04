@@ -6,7 +6,11 @@ export class DriverRepository {
       where: { id, role: 'driver' },
       include: {
         driverProfile: true,
-        vehicle: true,
+        vehicleDrivers: {
+          include: {
+            vehicle: true,
+          },
+        },
         tenant: true,
       },
     });
@@ -22,7 +26,11 @@ export class DriverRepository {
       },
       include: {
         driverProfile: true,
-        vehicle: true,
+        vehicleDrivers: {
+          include: {
+            vehicle: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });

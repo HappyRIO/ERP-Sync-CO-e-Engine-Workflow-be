@@ -135,11 +135,12 @@ export class VehicleService {
   }
 
   /**
-   * Allocate vehicle to driver (admin only)
+   * Add driver to vehicle (admin only)
+   * Supports many-to-many: multiple drivers can be assigned to a vehicle
    */
-  async allocateVehicleToDriver(
+  async addDriverToVehicle(
     vehicleId: string,
-    driverId: string | null,
+    driverId: string,
     tenantId: string
   ) {
     const vehicle = await vehicleRepo.findById(vehicleId);
@@ -151,125 +152,164 @@ export class VehicleService {
       throw new ValidationError('Vehicle does not belong to your tenant');
     }
 
-    // If allocating to a driver, verify driver exists and belongs to tenant
-    if (driverId) {
-      const driver = await prisma.user.findUnique({
-        where: { id: driverId },
+    // Verify driver exists and belongs to tenant
+    const driver = await prisma.user.findUnique({
+      where: { id: driverId },
+    });
+
+    if (!driver) {
+      throw new NotFoundError('Driver', driverId);
+    }
+
+    if (driver.role !== 'driver') {
+      throw new ValidationError('User must be a driver');
+    }
+
+    if (driver.tenantId !== tenantId) {
+      throw new ValidationError('Driver does not belong to your tenant');
+    }
+
+    // Check if driver is already assigned to this vehicle
+    const isAlreadyAssigned = vehicle.drivers?.some(vd => vd.driverId === driverId);
+    if (isAlreadyAssigned) {
+      throw new ValidationError('Driver is already assigned to this vehicle');
+    }
+
+    // Add driver to vehicle
+    await vehicleRepo.addDriverToVehicle(vehicleId, driverId);
+
+    // Send notification
+    const { notifyVehicleAllocation } = await import('../utils/notifications');
+    await notifyVehicleAllocation(
+      vehicleId,
+      vehicle.vehicleReg,
+      driverId,
+      tenantId
+    );
+
+    return vehicleRepo.findById(vehicleId);
+  }
+
+  /**
+   * Remove driver from vehicle (admin only)
+   */
+  async removeDriverFromVehicle(
+    vehicleId: string,
+    driverId: string,
+    tenantId: string
+  ) {
+    const vehicle = await vehicleRepo.findById(vehicleId);
+    if (!vehicle) {
+      throw new NotFoundError('Vehicle', vehicleId);
+    }
+
+    if (vehicle.tenantId !== tenantId) {
+      throw new ValidationError('Vehicle does not belong to your tenant');
+    }
+
+    // Check if driver is assigned to this vehicle
+    const isAssigned = vehicle.drivers?.some(vd => vd.driverId === driverId);
+    if (!isAssigned) {
+      throw new ValidationError('Driver is not assigned to this vehicle');
+    }
+
+    // Check if this driver-vehicle combination is assigned to active jobs
+    // Jobs use the driver's first vehicle, so we need to check if this vehicle is the first one
+    const { JobService } = await import('./job.service');
+    const jobService = new JobService();
+    const hasActiveJobs = await jobService.hasActiveJobs(driverId);
+    
+    if (hasActiveJobs) {
+      // Get the VehicleDriver records to check assignment order
+      const vehicleDriverRecords = await prisma.vehicleDriver.findMany({
+        where: { driverId },
+        orderBy: { createdAt: 'asc' }, // First assigned = first in list
       });
+      
+      // Check if this vehicle is the first one assigned (the one used by jobs)
+      const isFirstVehicle = vehicleDriverRecords.length > 0 && vehicleDriverRecords[0].vehicleId === vehicleId;
+      
+      if (isFirstVehicle) {
+        throw new ValidationError(
+          'Cannot remove driver from vehicle. This vehicle is assigned to active jobs. Please re-assign or complete the jobs first, or unassign the driver from those jobs.'
+        );
+      }
+      // If it's not the first vehicle, allow removal even if driver has active jobs
+    }
 
-      if (!driver) {
-        throw new NotFoundError('Driver', driverId);
+    // Remove driver from vehicle
+    await vehicleRepo.removeDriverFromVehicle(vehicleId, driverId);
+
+    // Send notification
+    const { notifyVehicleUnallocation } = await import('../utils/notifications');
+    await notifyVehicleUnallocation(
+      vehicleId,
+      vehicle.vehicleReg,
+      driverId,
+      tenantId
+    );
+
+    return vehicleRepo.findById(vehicleId);
+  }
+
+  /**
+   * Allocate vehicle to driver (admin only)
+   * Legacy method for backward compatibility - now adds driver instead of replacing
+   * If driverId is null, removes all drivers from the vehicle
+   */
+  async allocateVehicleToDriver(
+    vehicleId: string,
+    driverId: string | null,
+    tenantId: string
+  ) {
+    if (driverId === null) {
+      // Remove all drivers from vehicle
+      const vehicle = await vehicleRepo.findById(vehicleId);
+      if (!vehicle) {
+        throw new NotFoundError('Vehicle', vehicleId);
       }
 
-      if (driver.role !== 'driver') {
-        throw new ValidationError('User must be a driver');
+      if (vehicle.tenantId !== tenantId) {
+        throw new ValidationError('Vehicle does not belong to your tenant');
       }
 
-      if (driver.tenantId !== tenantId) {
-        throw new ValidationError('Driver does not belong to your tenant');
-      }
-
-      // Check if driver has active jobs - if so, prevent vehicle allocation changes
+      // Check if any assigned drivers have active jobs
       const { JobService } = await import('./job.service');
       const jobService = new JobService();
-      const hasActiveJobs = await jobService.hasActiveJobs(driverId);
       
-      if (hasActiveJobs) {
-        throw new ValidationError(
-          'Cannot change vehicle allocation. Driver has active jobs assigned. Please re-assign or complete the jobs first.'
-        );
-      }
-
-      // If the vehicle is currently allocated to a different driver, check if that driver has active jobs
-      if (vehicle.driverId && vehicle.driverId !== driverId) {
-        // Check if the current driver (being unallocated from) has active jobs
-        const currentDriverHasActiveJobs = await jobService.hasActiveJobs(vehicle.driverId);
-        if (currentDriverHasActiveJobs) {
-          throw new ValidationError(
-            'Cannot reallocate vehicle. Current driver has active jobs assigned. Please re-assign or complete the jobs first.'
-          );
+      if (vehicle.drivers && vehicle.drivers.length > 0) {
+        for (const vehicleDriver of vehicle.drivers) {
+          const hasActiveJobs = await jobService.hasActiveJobs(vehicleDriver.driverId);
+          if (hasActiveJobs) {
+            throw new ValidationError(
+              `Cannot unallocate vehicle. Driver ${vehicleDriver.driver.name} has active jobs assigned. Please re-assign or complete the jobs first.`
+            );
+          }
         }
       }
 
-      // Check if driver already has a vehicle allocated (switching vehicles)
-      const existingVehicle = await vehicleRepo.findByDriver(driverId);
-      if (existingVehicle && existingVehicle.id !== vehicleId) {
-        // Automatically unallocate the old vehicle when switching to a new one
-        // Note: We don't need to check for active jobs here because we already checked driverId above
-        await vehicleRepo.allocateToDriver(existingVehicle.id, null);
-        
-        // Notify driver about losing their old vehicle
-        const { notifyVehicleUnallocation } = await import('../utils/notifications');
+      // Store driver IDs for notifications
+      const driverIds = vehicle.drivers?.map(vd => vd.driverId) || [];
+
+      // Remove all drivers
+      const updatedVehicle = await vehicleRepo.allocateToDriver(vehicleId, null);
+
+      // Send notifications
+      const { notifyVehicleUnallocation } = await import('../utils/notifications');
+      for (const id of driverIds) {
         await notifyVehicleUnallocation(
-          existingVehicle.id,
-          existingVehicle.vehicleReg,
-          driverId,
+          vehicleId,
+          vehicle.vehicleReg,
+          id,
           tenantId
         );
       }
+
+      return updatedVehicle;
     } else {
-      // Unallocating vehicle - check if current driver has active jobs
-      if (vehicle.driverId) {
-        const { JobService } = await import('./job.service');
-        const jobService = new JobService();
-        const hasActiveJobs = await jobService.hasActiveJobs(vehicle.driverId);
-        
-        if (hasActiveJobs) {
-          throw new ValidationError(
-            'Cannot unallocate vehicle. Driver has active jobs assigned. Please re-assign or complete the jobs first.'
-          );
-        }
-      }
+      // Add driver to vehicle (using the new method)
+      return this.addDriverToVehicle(vehicleId, driverId, tenantId);
     }
-
-    // Store previous driver ID for notification purposes
-    const previousDriverId = vehicle.driverId;
-    
-    // Perform the allocation
-    const updatedVehicle = await vehicleRepo.allocateToDriver(vehicleId, driverId);
-
-    // Send notifications based on the allocation change
-    const { notifyVehicleAllocation, notifyVehicleUnallocation, notifyVehicleReallocation } = await import('../utils/notifications');
-    
-    if (driverId) {
-      // Allocating to a driver
-      if (previousDriverId && previousDriverId !== driverId) {
-        // Reallocation: vehicle was moved from one driver to another
-        // Notify the old driver
-        await notifyVehicleReallocation(
-          vehicleId,
-          vehicle.vehicleReg,
-          previousDriverId,
-          tenantId
-        );
-        // Notify the new driver
-        await notifyVehicleAllocation(
-          vehicleId,
-          vehicle.vehicleReg,
-          driverId,
-          tenantId
-        );
-      } else if (!previousDriverId) {
-        // New allocation: vehicle was unallocated, now allocated to a driver
-        await notifyVehicleAllocation(
-          vehicleId,
-          vehicle.vehicleReg,
-          driverId,
-          tenantId
-        );
-      }
-      // If previousDriverId === driverId, no change, no notification needed
-    } else if (previousDriverId) {
-      // Unallocation: vehicle was allocated, now unallocated
-      await notifyVehicleUnallocation(
-        vehicleId,
-        vehicle.vehicleReg,
-        previousDriverId,
-        tenantId
-      );
-    }
-
-    return updatedVehicle;
   }
 
   /**
@@ -285,9 +325,9 @@ export class VehicleService {
       throw new ValidationError('Vehicle does not belong to your tenant');
     }
 
-    // Check if vehicle is allocated to a driver
-    if (vehicle.driverId) {
-      throw new ValidationError('Cannot delete vehicle that is allocated to a driver. Please unallocate it first.');
+    // Check if vehicle is allocated to any drivers
+    if (vehicle.drivers && vehicle.drivers.length > 0) {
+      throw new ValidationError('Cannot delete vehicle that is allocated to drivers. Please unallocate all drivers first.');
     }
 
     return vehicleRepo.delete(id);

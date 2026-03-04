@@ -130,17 +130,20 @@ export function transformJobForAPI(job: any): TransformedJob {
         id: job.booking?.driverId,
         name: job.booking?.driverName || 'Assigned driver',
         driverProfile: null,
-        vehicle: null,
+        vehicleDrivers: [],
         phone: null,
         email: null,
       };
 
+      // Get the first vehicle assigned to the driver
+      const firstVehicle = baseDriver.vehicleDrivers?.[0]?.vehicle;
+
       const driverData = {
         id: baseDriver.id,
         name: baseDriver.name,
-        vehicleReg: baseDriver.vehicle?.vehicleReg ?? 'N/A',
-        vehicleType: (baseDriver.vehicle?.vehicleType ?? 'van') as 'van' | 'truck' | 'car',
-        vehicleFuelType: (baseDriver.vehicle?.vehicleFuelType ?? 'diesel') as 'petrol' | 'diesel' | 'electric',
+        vehicleReg: firstVehicle?.vehicleReg ?? 'N/A',
+        vehicleType: (firstVehicle?.vehicleType ?? 'van') as 'van' | 'truck' | 'car',
+        vehicleFuelType: (firstVehicle?.vehicleFuelType ?? 'diesel') as 'petrol' | 'diesel' | 'electric',
         phone: baseDriver.driverProfile?.phone ?? baseDriver.phone ?? baseDriver.email ?? 'N/A',
       };
 

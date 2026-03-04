@@ -26,7 +26,7 @@ export class JobController {
       }
 
       const { id } = req.params;
-      const { driverId } = req.body;
+      const { driverId, vehicleId } = req.body;
 
       // If driverId is null, undefined, or empty, unassign the driver
       if (!driverId || driverId === '' || driverId === null) {
@@ -40,7 +40,7 @@ export class JobController {
         } as ApiResponse);
       }
 
-      const job = await jobService.reassignDriver(id, driverId, req.user.userId);
+      const job = await jobService.reassignDriver(id, driverId, req.user.userId, vehicleId);
       const transformedJob = transformJobForAPI(job as any);
       const jobWithPresignedUrls = await processEvidenceUrls(transformedJob);
 

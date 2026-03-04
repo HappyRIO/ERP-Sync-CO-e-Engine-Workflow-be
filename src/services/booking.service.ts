@@ -649,7 +649,7 @@ export class BookingService {
    * Only allows driver assignment when booking status is "created" (after approval/generation)
    * Once a driver is assigned, the booking moves to "scheduled" status and driver cannot be changed
    */
-  async assignDriver(bookingId: string, driverId: string, scheduledBy: string) {
+  async assignDriver(bookingId: string, driverId: string, scheduledBy: string, vehicleId?: string) {
     const booking = await this.getBookingById(bookingId);
 
     // Only allow driver assignment when booking is in "created" status (Generated/Approved)
@@ -723,16 +723,43 @@ export class BookingService {
     const jobService = new JobService();
     if (!booking.jobId) {
       // Create job if it doesn't exist (this will send notification to driver)
-      await jobService.createJobFromBooking(booking.id, driverId);
+      await jobService.createJobFromBooking(booking.id, driverId, vehicleId);
     } else {
       // Update existing job to 'routed' and assign driver
       const jobRepo = new JobRepository();
       const job = await jobRepo.findById(booking.jobId);
       if (job) {
+        // Get vehicle information for travel emissions calculation
+        const driverWithVehicles = await prisma.user.findUnique({
+          where: { id: driverId },
+          include: {
+            vehicleDrivers: {
+              include: {
+                vehicle: true,
+              },
+            },
+          },
+        });
+
+        let selectedVehicle = null;
+        if (vehicleId && driverWithVehicles) {
+          const vehicleDriver = driverWithVehicles.vehicleDrivers?.find(vd => vd.vehicleId === vehicleId);
+          selectedVehicle = vehicleDriver?.vehicle;
+        } else if (driverWithVehicles) {
+          selectedVehicle = driverWithVehicles.vehicleDrivers?.[0]?.vehicle;
+        }
+
+        const vehicleFuelType = selectedVehicle?.vehicleFuelType || booking.preferredVehicleType || 'van';
+        const roundTripDistanceKm = (booking.roundTripDistanceKm && booking.roundTripDistanceKm > 0) 
+          ? booking.roundTripDistanceKm 
+          : 0;
+        const travelEmissions = calculateTravelEmissions(roundTripDistanceKm, vehicleFuelType);
+
         if (isValidJobTransition(job.status, 'routed')) {
           await jobRepo.update(job.id, {
             status: 'routed',
             driverId: driverId,
+            travelEmissions: travelEmissions,
           });
           await jobRepo.addStatusHistory(job.id, {
             status: 'routed',
@@ -756,9 +783,10 @@ export class BookingService {
             'driver'
           );
         } else {
-          // If transition is not valid, just assign the driver
+          // If transition is not valid, just assign the driver and update travel emissions
           await jobRepo.update(job.id, {
             driverId: driverId,
+            travelEmissions: travelEmissions,
           });
           // Notify driver of job assignment (status didn't change, so use assignment notification)
           const { notifyJobAssignment } = await import('../utils/notifications');

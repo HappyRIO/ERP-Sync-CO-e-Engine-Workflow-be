@@ -85,6 +85,17 @@ router.post(
   (req, res, next) => vehicleController.allocate(req, res, next)
 );
 
+// Remove specific driver from vehicle (admin only)
+router.delete(
+  '/:id/drivers/:driverId',
+  authorize('admin'),
+  validate([
+    param('id').isUUID().withMessage('Invalid vehicle ID'),
+    param('driverId').isUUID().withMessage('Invalid driver ID'),
+  ]),
+  (req, res, next) => vehicleController.removeDriver(req, res, next)
+);
+
 // Delete vehicle (admin only)
 router.delete(
   '/:id',

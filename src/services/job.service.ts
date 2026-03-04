@@ -16,7 +16,7 @@ export class JobService {
    * Create job from booking (when driver assigned)
    * If job already exists (created when booking was approved), update it to 'routed' and assign driver
    */
-  async createJobFromBooking(bookingId: string, driverId: string) {
+  async createJobFromBooking(bookingId: string, driverId: string, vehicleId?: string) {
     const booking = await bookingRepo.findById(bookingId);
     if (!booking) {
       throw new NotFoundError('Booking', bookingId);
@@ -28,14 +28,35 @@ export class JobService {
 
     const driver = await prisma.user.findUnique({
       where: { id: driverId },
-      include: { vehicle: true },
+      include: { 
+        vehicleDrivers: {
+          include: {
+            vehicle: true,
+          },
+        },
+      },
     });
 
     if (!driver || driver.role !== 'driver') {
       throw new NotFoundError('Driver', driverId);
     }
 
-    const vehicleFuelType = driver.vehicle?.vehicleFuelType || booking.preferredVehicleType || 'van';
+    // Get the specific vehicle if provided, otherwise use the first vehicle assigned to the driver
+    let selectedVehicle = null;
+    if (vehicleId) {
+      // Find the specific vehicle from the driver's vehicles
+      const vehicleDriver = driver.vehicleDrivers?.find(vd => vd.vehicleId === vehicleId);
+      selectedVehicle = vehicleDriver?.vehicle;
+      
+      if (!selectedVehicle) {
+        throw new ValidationError(`Vehicle ${vehicleId} is not assigned to driver ${driverId}`);
+      }
+    } else {
+      // Use the first vehicle if no specific vehicle is provided
+      selectedVehicle = driver.vehicleDrivers?.[0]?.vehicle;
+    }
+    
+    const vehicleFuelType = selectedVehicle?.vehicleFuelType || booking.preferredVehicleType || 'van';
     // Use 0 if distance is not available (instead of defaulting to 80km)
     // This allows proper error handling when distance calculation failed
     const roundTripDistanceKm = (booking.roundTripDistanceKm && booking.roundTripDistanceKm > 0) 
@@ -307,11 +328,15 @@ export class JobService {
                     phone: true,
                   },
                 },
-                vehicle: {
+                vehicleDrivers: {
                   select: {
-                    vehicleReg: true,
-                    vehicleType: true,
-                    vehicleFuelType: true,
+                    vehicle: {
+                      select: {
+                        vehicleReg: true,
+                        vehicleType: true,
+                        vehicleFuelType: true,
+                      },
+                    },
                   },
                 },
             },
@@ -433,11 +458,15 @@ export class JobService {
                     phone: true,
                   },
                 },
-                vehicle: {
+                vehicleDrivers: {
                   select: {
-                    vehicleReg: true,
-                    vehicleType: true,
-                    vehicleFuelType: true,
+                    vehicle: {
+                      select: {
+                        vehicleReg: true,
+                        vehicleType: true,
+                        vehicleFuelType: true,
+                      },
+                    },
                   },
                 },
               },
@@ -599,11 +628,15 @@ export class JobService {
                     phone: true,
                   },
                 },
-                vehicle: {
+                vehicleDrivers: {
                   select: {
-                    vehicleReg: true,
-                    vehicleType: true,
-                    vehicleFuelType: true,
+                    vehicle: {
+                      select: {
+                        vehicleReg: true,
+                        vehicleType: true,
+                        vehicleFuelType: true,
+                      },
+                    },
                   },
                 },
             },
@@ -728,11 +761,15 @@ export class JobService {
                     phone: true,
                   },
                 },
-                vehicle: {
+                vehicleDrivers: {
                   select: {
-                    vehicleReg: true,
-                    vehicleType: true,
-                    vehicleFuelType: true,
+                    vehicle: {
+                      select: {
+                        vehicleReg: true,
+                        vehicleType: true,
+                        vehicleFuelType: true,
+                      },
+                    },
                   },
                 },
             },
@@ -1320,7 +1357,7 @@ export class JobService {
    * Re-assign driver to a job (admin only)
    * Only allowed if job status is 'routed' (not 'en_route' or later)
    */
-  async reassignDriver(jobId: string, newDriverId: string, changedBy: string) {
+  async reassignDriver(jobId: string, newDriverId: string, changedBy: string, vehicleId?: string) {
     const job = await jobRepo.findById(jobId);
     if (!job) {
       throw new NotFoundError('Job', jobId);
@@ -1336,24 +1373,55 @@ export class JobService {
     // Verify new driver exists and is a driver
     const newDriver = await prisma.user.findUnique({
       where: { id: newDriverId },
-      include: { vehicle: true },
+      include: { 
+        vehicleDrivers: {
+          include: {
+            vehicle: true,
+          },
+        },
+      },
     });
 
     if (!newDriver || newDriver.role !== 'driver') {
       throw new NotFoundError('Driver', newDriverId);
     }
 
-    // Verify driver has a vehicle allocated
-    if (!newDriver.vehicle) {
+    // Verify driver has at least one vehicle allocated
+    if (!newDriver.vehicleDrivers || newDriver.vehicleDrivers.length === 0) {
       throw new ValidationError('Cannot assign driver without an allocated vehicle');
     }
+
+    // Get the specific vehicle if provided, otherwise use the first vehicle assigned to the driver
+    let selectedVehicle = null;
+    if (vehicleId) {
+      // Find the specific vehicle from the driver's vehicles
+      const vehicleDriver = newDriver.vehicleDrivers.find(vd => vd.vehicleId === vehicleId);
+      selectedVehicle = vehicleDriver?.vehicle;
+      
+      if (!selectedVehicle) {
+        throw new ValidationError(`Vehicle ${vehicleId} is not assigned to driver ${newDriverId}`);
+      }
+    } else {
+      // Use the first vehicle if no specific vehicle is provided
+      selectedVehicle = newDriver.vehicleDrivers[0]?.vehicle;
+    }
+
+    // Recalculate travel emissions based on the selected vehicle
+    const booking = job.booking;
+    const vehicleFuelType = selectedVehicle?.vehicleFuelType || booking?.preferredVehicleType || 'diesel';
+    const roundTripDistanceKm = booking?.roundTripDistanceKm && booking.roundTripDistanceKm > 0
+      ? booking.roundTripDistanceKm
+      : 0;
+    const { calculateTravelEmissions } = await import('../utils/co2');
+    const travelEmissions = calculateTravelEmissions(roundTripDistanceKm, vehicleFuelType);
 
     // Get old driver ID for notification
     const oldDriverId = job.driverId;
 
-    // Update job with new driver
+    // Update job with new driver and recalculated travel emissions
     await jobRepo.update(job.id, {
       driverId: newDriverId,
+      travelEmissions: travelEmissions,
     });
 
     // Add status history

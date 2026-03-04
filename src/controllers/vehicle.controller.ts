@@ -65,19 +65,19 @@ export class VehicleController {
 
       const { driverId } = req.params;
 
-      // Drivers can only view their own vehicle, admins can view any driver's vehicle
+      // Drivers can only view their own vehicles, admins can view any driver's vehicles
       if (req.user.role === 'driver' && driverId !== req.user.userId) {
         return res.status(403).json({
           success: false,
-          error: 'Forbidden: Drivers can only view their own vehicle',
+          error: 'Forbidden: Drivers can only view their own vehicles',
         } as ApiResponse);
       }
 
-      const vehicle = await vehicleService.getVehicleByDriver(driverId);
+      const vehicles = await vehicleService.getVehicleByDriver(driverId);
 
       return res.json({
         success: true,
-        data: vehicle,
+        data: vehicles, // Now returns an array
       } as ApiResponse);
     } catch (error) {
       return next(error);
@@ -162,6 +162,33 @@ export class VehicleController {
       return res.json({
         success: true,
         data: vehicle,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async removeDriver(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id, driverId } = req.params;
+
+      const vehicle = await vehicleService.removeDriverFromVehicle(
+        id,
+        driverId,
+        req.user.tenantId
+      );
+
+      return res.json({
+        success: true,
+        data: vehicle,
+        message: 'Driver removed from vehicle successfully',
       } as ApiResponse);
     } catch (error) {
       return next(error);

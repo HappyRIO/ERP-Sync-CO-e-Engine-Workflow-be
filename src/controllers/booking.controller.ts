@@ -169,9 +169,9 @@ export class BookingController {
       }
 
       const { id } = req.params;
-      const { driverId } = req.body;
+      const { driverId, vehicleId } = req.body;
 
-      const booking = await bookingService.assignDriver(id, driverId, req.user.userId);
+      const booking = await bookingService.assignDriver(id, driverId, req.user.userId, vehicleId);
 
       const transformedBooking = transformBookingForAPI(booking as any);
       return res.json({
