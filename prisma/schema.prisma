@@ -10,18 +10,19 @@ datasource db {
 
 // Users and Authentication
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  name      String
-  password  String // Hashed password
-  role      UserRole
-  status    UserStatus @default(pending)
-  tenantId  String
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  avatar    String?
-  phone     String? // Phone number for drivers
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id           String     @id @default(uuid())
+  email        String     @unique
+  name         String
+  password     String // Hashed password
+  role         UserRole
+  status       UserStatus @default(pending)
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  avatar       String?
+  phone        String? // Phone number for drivers
+  isSuperAdmin Boolean    @default(false) // Hidden admin account for developers
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   // Relations
   bookingsCreated     Booking[]            @relation("CreatedBy")

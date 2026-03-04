@@ -973,6 +973,7 @@ export class JobService {
         where: {
           role: 'admin',
           status: 'active',
+          isSuperAdmin: false, // Exclude super admins from notifications
         },
         select: { id: true },
       });

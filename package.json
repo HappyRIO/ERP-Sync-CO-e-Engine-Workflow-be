@@ -14,7 +14,8 @@
     "db:studio": "prisma studio",
     "db:cleanup": "tsx cleanup-database.ts",
     "db:check-categories": "tsx check-categories.ts",
-    "db:update-categories": "tsx update-categories.ts"
+    "db:update-categories": "tsx update-categories.ts",
+    "create-super-admin": "tsx create-super-admin.ts"
   },
   "keywords": [
     "itad",

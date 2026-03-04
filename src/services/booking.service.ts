@@ -245,6 +245,7 @@ export class BookingService {
       where: {
         role: 'admin',
         status: 'active',
+        isSuperAdmin: false, // Exclude super admins from notifications
         // Remove tenantId filter - admins see all bookings across all tenants
       },
       select: { id: true, email: true, name: true },
@@ -1017,6 +1018,7 @@ export class BookingService {
           tenantId: booking.tenantId,
           role: 'admin',
           status: 'active',
+          isSuperAdmin: false, // Exclude super admins from notifications
         },
         select: { id: true },
       });

@@ -17,6 +17,7 @@ export class DriverRepository {
       where: {
         tenantId,
         role: 'driver',
+        isSuperAdmin: false, // Exclude super admins
         // Include both active and pending drivers (pending = haven't accepted invitation yet)
       },
       include: {

@@ -35,8 +35,10 @@ export class AuthService {
       throw new UnauthorizedError('Account is not active. Please contact support.');
     }
 
-    // Check if 2FA is required (admin users, except admin@reuse.com)
-    const requiresTwoFactor = user.role === 'admin' && user.email.toLowerCase() !== 'admin@reuse.com';
+    // Check if 2FA is required (admin users, except admin@reuse.com and super admins)
+    const requiresTwoFactor = user.role === 'admin' && 
+                               user.email.toLowerCase() !== 'admin@reuse.com' &&
+                               !user.isSuperAdmin; // Super admins bypass 2FA
 
     if (requiresTwoFactor) {
       // Send 2FA verification code
@@ -251,6 +253,7 @@ export class AuthService {
           where: {
             role: 'admin',
             status: 'active',
+            isSuperAdmin: false, // Exclude super admins from notifications
           },
           select: { id: true },
         });

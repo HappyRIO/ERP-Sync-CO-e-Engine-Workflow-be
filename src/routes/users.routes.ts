@@ -21,7 +21,10 @@ router.get(
       }
 
       // Build where clause - admins see all users (no tenantId filter)
-      const where: any = {};
+      // Exclude super admin accounts from listings
+      const where: any = {
+        isSuperAdmin: false, // Always exclude super admins from user listings
+      };
       
       // Filter by role if provided
       if (req.query.role) {
@@ -104,6 +107,14 @@ router.get(
         } as ApiResponse);
       }
 
+      // Hide super admin accounts from being viewed
+      if (user.isSuperAdmin) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+        } as ApiResponse);
+      }
+
       // Transform user to match frontend ExtendedUser interface
       const transformedUser = {
         id: user.id,
@@ -153,6 +164,14 @@ router.patch(
           tenant: true,
         },
       });
+
+      // Prevent modifying super admin accounts
+      if (user?.isSuperAdmin) {
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot modify super admin account',
+        } as ApiResponse);
+      }
 
       if (!user) {
         return res.status(404).json({
@@ -267,6 +286,14 @@ router.patch(
         } as ApiResponse);
       }
 
+      // Prevent modifying super admin accounts
+      if (user.isSuperAdmin) {
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot modify super admin account',
+        } as ApiResponse);
+      }
+
       // Only approve if status is pending or declined
       // Declined users can be approved (treated as a new signup approval)
       const currentStatus = user.status as string;
@@ -345,6 +372,14 @@ router.patch(
         return res.status(404).json({
           success: false,
           error: `User with ID "${id}" was not found.`,
+        } as ApiResponse);
+      }
+
+      // Prevent modifying super admin accounts
+      if (user.isSuperAdmin) {
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot modify super admin account',
         } as ApiResponse);
       }
 

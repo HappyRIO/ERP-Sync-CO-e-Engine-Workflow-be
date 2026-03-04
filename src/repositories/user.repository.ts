@@ -46,14 +46,21 @@ export class UserRepository {
 
   async findByTenant(tenantId: string) {
     return prisma.user.findMany({
-      where: { tenantId },
+      where: { 
+        tenantId,
+        isSuperAdmin: false, // Exclude super admins
+      },
       include: { tenant: true },
     });
   }
 
   async findByRole(role: UserRole) {
     return prisma.user.findMany({
-      where: { role, status: 'active' },
+      where: { 
+        role, 
+        status: 'active',
+        isSuperAdmin: false, // Exclude super admins
+      },
       include: { tenant: true },
     });
   }

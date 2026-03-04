@@ -133,6 +133,7 @@ router.get(
       
       const userWhere: any = {
         role: 'client',
+        isSuperAdmin: false, // Exclude super admins
       };
       if (tenantIds) {
         userWhere.tenantId = { in: tenantIds };
