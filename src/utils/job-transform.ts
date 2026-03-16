@@ -44,6 +44,14 @@ export interface TransformedJob {
   charityPercent: number;
   roundTripDistanceKm?: number | null; // From booking
   roundTripDistanceMiles?: number | null; // From booking
+  bookingType?: 'itad_collection' | 'jml'; // From booking
+  jmlSubType?: 'new_starter' | 'leaver' | 'breakfix' | 'mover'; // From booking
+  // Mover booking specific fields (from booking status history)
+  currentAddress?: string;
+  currentPostcode?: string;
+  currentSiteName?: string;
+  currentLat?: number;
+  currentLng?: number;
   // Driver journey fields (entered before starting journey in routed status)
   dial2Collection?: string | null;
   securityRequirements?: string | null;
@@ -92,7 +100,7 @@ function transformStatus(status: JobStatus): string {
  * Transform a Prisma job to API response format
  */
 export function transformJobForAPI(job: any): TransformedJob {
-  return {
+  const result: TransformedJob = {
     id: job.id,
     erpJobNumber: job.erpJobNumber,
     bookingId: job.bookingId,
@@ -185,6 +193,91 @@ export function transformJobForAPI(job: any): TransformedJob {
     charityPercent: job.charityPercent || 0,
     roundTripDistanceKm: job.booking?.roundTripDistanceKm ?? null,
     roundTripDistanceMiles: job.booking?.roundTripDistanceMiles ?? null,
+    bookingType: (job.booking?.bookingType === 'jml' ? 'jml' : 'itad_collection') as 'itad_collection' | 'jml',
+    jmlSubType: job.booking?.jmlSubType || null,
+    // Extract current address from booking status history for mover bookings
+    ...(job.booking?.jmlSubType === 'mover' && job.booking?.statusHistory ? (() => {
+      try {
+        // Debug logging
+        console.log('[Job Transform] Mover job detected, checking statusHistory:', {
+          hasBooking: !!job.booking,
+          jmlSubType: job.booking?.jmlSubType,
+          hasStatusHistory: !!job.booking?.statusHistory,
+          statusHistoryLength: job.booking?.statusHistory?.length || 0,
+          statusHistoryEntries: job.booking?.statusHistory?.map((h: any) => ({
+            status: h.status,
+            hasNotes: !!h.notes,
+            notesPreview: h.notes ? h.notes.substring(0, 100) : null,
+          })) || [],
+        });
+
+        // Find the first status history entry that contains current address info
+        const historyWithAddress = job.booking.statusHistory.find((h: any) => 
+          h.notes && h.notes.includes('Current address:')
+        );
+        
+        if (!historyWithAddress) {
+          console.log('[Job Transform] No statusHistory entry found with "Current address:"');
+          return {};
+        }
+
+        if (historyWithAddress?.notes) {
+          console.log('[Job Transform] Found statusHistory with address, notes:', historyWithAddress.notes);
+          // Extract JSON object after "Current address: "
+          // The JSON string starts after "Current address: " and goes to the end or until next period
+          const addressPrefix = 'Current address: ';
+          const prefixIndex = historyWithAddress.notes.indexOf(addressPrefix);
+          if (prefixIndex !== -1) {
+            const jsonStart = prefixIndex + addressPrefix.length;
+            // Find the JSON object - it starts with { and we need to find the matching }
+            let braceCount = 0;
+            let jsonEnd = jsonStart;
+            for (let i = jsonStart; i < historyWithAddress.notes.length; i++) {
+              if (historyWithAddress.notes[i] === '{') braceCount++;
+              if (historyWithAddress.notes[i] === '}') {
+                braceCount--;
+                if (braceCount === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
+              }
+            }
+            if (jsonEnd > jsonStart) {
+              const jsonString = historyWithAddress.notes.substring(jsonStart, jsonEnd);
+              console.log('[Job Transform] Extracted JSON string:', jsonString);
+              const addressInfo = JSON.parse(jsonString);
+              console.log('[Job Transform] Parsed address info:', addressInfo);
+              const result = {
+                currentAddress: addressInfo.currentAddress,
+                currentPostcode: addressInfo.currentPostcode,
+                currentSiteName: addressInfo.currentSiteName,
+                currentLat: addressInfo.currentLat,
+                currentLng: addressInfo.currentLng,
+              };
+              console.log('[Job Transform] Returning address fields:', result);
+              return result;
+            } else {
+              console.log('[Job Transform] Failed to find complete JSON object');
+            }
+          } else {
+            console.log('[Job Transform] "Current address:" prefix not found in notes');
+          }
+        }
+      } catch (e) {
+        // If parsing fails, return empty object
+        console.error('[Job Transform] Failed to extract currentAddress from booking statusHistory:', e);
+      }
+      return {};
+    })() : (() => {
+      // Debug logging for non-mover or missing statusHistory
+      if (job.booking?.jmlSubType === 'mover') {
+        console.log('[Job Transform] Mover job but missing statusHistory:', {
+          hasBooking: !!job.booking,
+          hasStatusHistory: !!job.booking?.statusHistory,
+        });
+      }
+      return {};
+    })()),
     dial2Collection: job.dial2Collection ?? null,
     securityRequirements: job.securityRequirements ?? null,
     idRequired: job.idRequired ?? null,
@@ -252,14 +345,26 @@ export function transformJobForAPI(job: any): TransformedJob {
         };
       });
     })(),
-    certificates: (job.certificates || []).map((cert: any) => ({
-      type: cert.type.replace(/_/g, '-'), // chain_of_custody -> chain-of-custody
-      generatedDate: cert.generatedDate instanceof Date
-        ? cert.generatedDate.toISOString()
-        : cert.generatedDate,
-      downloadUrl: cert.downloadUrl,
-    })),
+      certificates: (job.certificates || []).map((cert: any) => ({
+        type: cert.type.replace(/_/g, '-'), // chain_of_custody -> chain-of-custody
+        generatedDate: cert.generatedDate instanceof Date
+          ? cert.generatedDate.toISOString()
+          : cert.generatedDate,
+        downloadUrl: cert.downloadUrl,
+      })),
   };
+  
+  // Debug: Log the final transformed object to verify currentAddress fields are included
+  if (result.jmlSubType === 'mover') {
+    console.log('[Job Transform] Final transformed object includes currentAddress fields:', {
+      currentAddress: result.currentAddress,
+      currentPostcode: result.currentPostcode,
+      currentSiteName: result.currentSiteName,
+      hasAllFields: !!(result.currentAddress && result.currentPostcode && result.currentSiteName),
+    });
+  }
+  
+  return result;
 }
 
 /**

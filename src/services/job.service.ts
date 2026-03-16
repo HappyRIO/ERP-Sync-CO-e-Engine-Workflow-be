@@ -2,9 +2,10 @@
 
 import { JobRepository } from '../repositories/job.repository';
 import { BookingRepository } from '../repositories/booking.repository';
-import { isValidJobTransition, isValidBookingTransition } from '../middleware/workflow';
+import { isValidJobTransition, isValidJobTransitionForType, isValidBookingTransitionForType } from '../middleware/workflow';
 import { ValidationError, NotFoundError } from '../utils/errors';
-import { JobStatus, BookingStatus } from '../types';
+import { JobStatus } from '../types';
+import { BookingStatus } from '@prisma/client';
 import { calculateTravelEmissions } from '../utils/co2';
 import prisma from '../config/database';
 
@@ -278,6 +279,8 @@ export class JobService {
               select: {
                 id: true,
                 bookingNumber: true,
+                bookingType: true,
+                jmlSubType: true,
                 client: {
                   select: {
                     id: true,
@@ -295,6 +298,15 @@ export class JobService {
                 },
                 roundTripDistanceKm: true,
                 roundTripDistanceMiles: true,
+                statusHistory: {
+                  select: {
+                    id: true,
+                    status: true,
+                    notes: true,
+                    createdAt: true,
+                  },
+                  orderBy: { createdAt: 'desc' },
+                },
               },
           },
           assets: {
@@ -369,10 +381,42 @@ export class JobService {
       const isHistoryRequest = filters.status && excludedStatuses.includes(filters.status);
       
       if (isHistoryRequest) {
-        // For history page: include only warehouse+ statuses
-        where.status = {
-          in: excludedStatuses,
-        };
+        // For history page: include warehouse+ statuses AND jobs beyond driver's final status
+        // This includes:
+        // - warehouse, sanitised, graded, completed (for ITAD/Leaver/Breakfix)
+        // - delivery-arrived, delivery-routed, delivery-en-route, completed (for Breakfix/Mover)
+        // - delivery-arrived, completed (for Mover - doesn't go through warehouse/sanitised/graded)
+        // - arrived, completed (for new_starter jobs - their final driver status)
+        where.OR = [
+          // ITAD/Leaver/Breakfix: warehouse, sanitised, graded, completed
+          {
+            status: { in: excludedStatuses },
+            booking: {
+              jmlSubType: { not: 'mover' }, // Mover doesn't use warehouse/sanitised/graded
+            },
+          },
+          // Breakfix: delivery statuses
+          {
+            status: { in: ['delivery_arrived', 'delivery_routed', 'delivery_en_route'] },
+            booking: {
+              jmlSubType: { in: ['breakfix', 'mover'] },
+            },
+          },
+          // Mover: delivery-arrived and completed (no warehouse/sanitised/graded)
+          {
+            status: 'completed',
+            booking: {
+              jmlSubType: 'mover',
+            },
+          },
+          // New Starter: arrived status (final driver status)
+          {
+            status: 'arrived',
+            booking: {
+              jmlSubType: 'new_starter',
+            },
+          },
+        ];
       } else if (filters.status && !excludedStatuses.includes(filters.status)) {
         // Specific active status filter
         where.status = filters.status;
@@ -408,6 +452,8 @@ export class JobService {
               select: {
                 id: true,
                 bookingNumber: true,
+                bookingType: true,
+                jmlSubType: true,
                 client: {
                   select: {
                     id: true,
@@ -586,6 +632,8 @@ export class JobService {
               select: {
                 id: true,
                 bookingNumber: true,
+                bookingType: true,
+                jmlSubType: true,
                 client: {
                   select: {
                     id: true,
@@ -595,6 +643,15 @@ export class JobService {
                 },
                 roundTripDistanceKm: true,
                 roundTripDistanceMiles: true,
+                statusHistory: {
+                  select: {
+                    id: true,
+                    status: true,
+                    notes: true,
+                    createdAt: true,
+                  },
+                  orderBy: { createdAt: 'desc' },
+                },
               },
           },
           assets: {
@@ -719,6 +776,8 @@ export class JobService {
               select: {
                 id: true,
                 bookingNumber: true,
+                bookingType: true,
+                jmlSubType: true,
                 client: {
                   select: {
                     id: true,
@@ -728,6 +787,15 @@ export class JobService {
                 },
                 roundTripDistanceKm: true,
                 roundTripDistanceMiles: true,
+                statusHistory: {
+                  select: {
+                    id: true,
+                    status: true,
+                    notes: true,
+                    createdAt: true,
+                  },
+                  orderBy: { createdAt: 'desc' },
+                },
               },
           },
           assets: {
@@ -815,9 +883,67 @@ export class JobService {
   ) {
     const job = await this.getJobById(jobId);
 
-    if (!isValidJobTransition(job.status, newStatus)) {
+    // Get booking type for type-specific validation
+    let bookingType: 'itad_collection' | 'jml' = 'itad_collection';
+    let jmlSubType = null;
+    
+    if (job.bookingId) {
+      const booking = await bookingRepo.findById(job.bookingId);
+      if (booking) {
+        bookingType = booking.bookingType || 'itad_collection';
+        jmlSubType = booking.jmlSubType;
+        
+        // If bookingType is 'jml' but jmlSubType is missing, this is an error
+        if (bookingType === 'jml' && !jmlSubType) {
+          const { logger } = await import('../utils/logger');
+          logger.error('JML booking missing jmlSubType for job', {
+            jobId,
+            bookingId: job.bookingId,
+            bookingType: booking.bookingType,
+            jmlSubType: booking.jmlSubType,
+          });
+          throw new ValidationError(
+            'Associated JML booking is missing jmlSubType. Please update the booking to include the JML sub-type.'
+          );
+        }
+        
+        // Debug logging to verify booking type is being read correctly
+        const { logger } = await import('../utils/logger');
+        logger.info('Job status update validation', {
+          jobId,
+          currentStatus: job.status,
+          newStatus,
+          bookingId: job.bookingId,
+          bookingType,
+          jmlSubType,
+          bookingTypeFromDB: booking.bookingType,
+          jmlSubTypeFromDB: booking.jmlSubType,
+        });
+      }
+    }
+
+    // Always use type-specific validation
+    const isValid = isValidJobTransitionForType(
+      job.status, 
+      newStatus, 
+      bookingType, 
+      jmlSubType
+    );
+
+    if (!isValid) {
+      const bookingTypeLabel = bookingType === 'jml' && jmlSubType
+        ? `${bookingType} (${jmlSubType})`
+        : bookingType;
+      const { logger } = await import('../utils/logger');
+      logger.warn('Invalid job status transition', {
+        jobId,
+        from: job.status,
+        to: newStatus,
+        bookingType,
+        jmlSubType,
+      });
       throw new ValidationError(
-        `Invalid status transition from "${job.status}" to "${newStatus}"`
+        `Invalid status transition from "${job.status}" to "${newStatus}" for booking type "${bookingTypeLabel}"`
       );
     }
 
@@ -1042,35 +1168,92 @@ export class JobService {
     if (job.bookingId) {
       const booking = await bookingRepo.findById(job.bookingId);
       if (booking) {
-        // Map job status to booking status
+        const bookingType = booking.bookingType || 'itad_collection';
+        const jmlSubType = booking.jmlSubType;
+        
+        // Map job status to booking status based on booking type
         let targetBookingStatus: BookingStatus | null = null;
 
-        // Map job statuses to booking statuses
-        if (newStatus === 'collected' || newStatus === 'warehouse') {
-          // Both "collected" and "warehouse" mean booking is "collected"
-          targetBookingStatus = 'collected';
+        if (newStatus === 'collected') {
+          targetBookingStatus = 'collected' as BookingStatus;
+        } else if (newStatus === 'warehouse') {
+          // For ITAD, Leaver, Mover, and Breakfix: warehouse → warehouse
+          if (bookingType === 'itad_collection' || 
+              (bookingType === 'jml' && (jmlSubType === 'leaver' || jmlSubType === 'mover' || jmlSubType === 'breakfix'))) {
+            targetBookingStatus = 'warehouse' as BookingStatus;
+          }
         } else if (newStatus === 'sanitised') {
-          targetBookingStatus = 'sanitised';
+          targetBookingStatus = 'sanitised' as BookingStatus;
         } else if (newStatus === 'graded') {
-          targetBookingStatus = 'graded';
+          targetBookingStatus = 'graded' as BookingStatus;
+        } else if (newStatus === 'inventory') {
+          // Leaver, Mover, Breakfix: job inventory → booking inventory
+          if (bookingType === 'jml' && (jmlSubType === 'leaver' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
+            targetBookingStatus = 'inventory' as BookingStatus;
+          }
+        } else if (newStatus === 'in_transit') {
+          // For New-starter, Mover, and Breakfix: job in_transit → booking in_transit
+          if (bookingType === 'jml' && (jmlSubType === 'new_starter' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
+            targetBookingStatus = 'in_transit' as BookingStatus;
+          }
+        } else if (newStatus === 'arrived') {
+          // For New-starter, Mover, Breakfix: if booking is in_transit, then arrived means delivered
+          // For Breakfix, this is the first phase (replacement delivery)
+          if (bookingType === 'jml' && booking.status === 'in_transit' && 
+              (jmlSubType === 'new_starter' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
+            targetBookingStatus = 'delivered' as BookingStatus;
+          }
+        } else if (newStatus === 'delivery_routed') {
+          // Mover: delivery_routed → device_allocated (new device delivery routed)
+          // Breakfix: delivery_routed → delivery_scheduled (replacement delivery scheduled)
+          if (bookingType === 'jml') {
+            if (jmlSubType === 'mover') {
+              targetBookingStatus = 'device_allocated' as BookingStatus;
+            } else if (jmlSubType === 'breakfix') {
+              targetBookingStatus = 'delivery_scheduled' as BookingStatus;
+            }
+          }
+        } else if (newStatus === 'delivery_en_route') {
+          // Mover: delivery_en_route → courier_booked (new device in transit)
+          // Breakfix: delivery_en_route → in_transit (replacement devices in transit)
+          if (bookingType === 'jml') {
+            if (jmlSubType === 'mover') {
+              targetBookingStatus = 'courier_booked' as BookingStatus;
+            } else if (jmlSubType === 'breakfix') {
+              targetBookingStatus = 'in_transit' as BookingStatus;
+            }
+          }
+        } else if (newStatus === 'delivery_arrived') {
+          // Breakfix and Mover: delivery_arrived → delivered
+          if (bookingType === 'jml' && (jmlSubType === 'breakfix' || jmlSubType === 'mover')) {
+            targetBookingStatus = 'delivered' as BookingStatus;
+          }
         } else if (newStatus === 'completed') {
-          targetBookingStatus = 'completed';
+          targetBookingStatus = 'completed' as BookingStatus;
         } else if (newStatus === 'cancelled') {
-          targetBookingStatus = 'cancelled';
+          targetBookingStatus = 'cancelled' as BookingStatus;
         }
 
         // Update booking status if it's different and the transition is valid
         if (targetBookingStatus && booking.status !== targetBookingStatus) {
-          if (isValidBookingTransition(booking.status, targetBookingStatus)) {
+          if (isValidBookingTransitionForType(booking.status, targetBookingStatus, bookingType, jmlSubType)) {
             const updateData: any = { status: targetBookingStatus };
             
             // Set appropriate timestamps
             if (targetBookingStatus === 'collected' && !booking.collectedAt) {
               updateData.collectedAt = new Date();
+            // Note: warehouseAt field doesn't exist in schema, so we don't set a timestamp for warehouse status
+            // The warehouse status itself indicates when assets reached the warehouse
             } else if (targetBookingStatus === 'sanitised' && !booking.sanitisedAt) {
               updateData.sanitisedAt = new Date();
             } else if (targetBookingStatus === 'graded' && !booking.gradedAt) {
               updateData.gradedAt = new Date();
+            } else if (targetBookingStatus === 'delivery_scheduled' && !booking.scheduledAt) {
+              // For Breakfix re-delivery, we can re-use scheduledAt or add a new field
+              // For now, update scheduledAt if it's the re-delivery scheduling
+              updateData.scheduledAt = new Date();
+            } else if (targetBookingStatus === 'delivered' && !booking.deliveryDate) {
+              updateData.deliveryDate = new Date();
             } else if (targetBookingStatus === 'completed' && !booking.completedAt) {
               updateData.completedAt = new Date();
             }

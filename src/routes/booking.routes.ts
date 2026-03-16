@@ -64,4 +64,61 @@ router.patch(
   bookingController.updateStatus.bind(bookingController)
 );
 
+// JML Booking endpoints
+// Create new starter booking
+router.post(
+  '/jml/new-starter',
+  authorize('admin', 'client', 'reseller'),
+  bookingController.createNewStarter.bind(bookingController)
+);
+
+// Create leaver booking
+router.post(
+  '/jml/leaver',
+  authorize('admin', 'client', 'reseller'),
+  bookingController.createLeaver.bind(bookingController)
+);
+
+// Create breakfix booking
+router.post(
+  '/jml/breakfix',
+  authorize('admin', 'client', 'reseller'),
+  bookingController.createBreakfix.bind(bookingController)
+);
+
+// Create mover booking
+router.post(
+  '/jml/mover',
+  authorize('admin', 'client', 'reseller'),
+  bookingController.createMover.bind(bookingController)
+);
+
+// Allocate device (admin only)
+router.patch(
+  '/:id/allocate-device',
+  requireAdmin,
+  bookingController.allocateDevice.bind(bookingController)
+);
+
+// Update courier tracking (admin only)
+router.patch(
+  '/:id/courier-tracking',
+  requireAdmin,
+  bookingController.updateCourierTracking.bind(bookingController)
+);
+
+// Mark as delivered (admin only)
+router.patch(
+  '/:id/mark-delivered',
+  requireAdmin,
+  bookingController.markDelivered.bind(bookingController)
+);
+
+// Mark as collected (admin only)
+router.patch(
+  '/:id/mark-collected',
+  requireAdmin,
+  bookingController.markCollected.bind(bookingController)
+);
+
 export default router;

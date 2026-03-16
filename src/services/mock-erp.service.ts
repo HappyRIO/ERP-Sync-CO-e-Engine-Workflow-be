@@ -38,6 +38,55 @@ export interface ERPSanitisationResult {
   }>;
 }
 
+export interface ERPInventoryItem {
+  erpInventoryId: string;
+  deviceType: string; // laptop, mobile_phone
+  make: string;
+  model: string;
+  serialNumber: string;
+  imei?: string;
+  conditionCode: string; // IBMA, IBMB, etc.
+  status: string;
+}
+
+export interface ERPInventorySyncResponse {
+  items: ERPInventoryItem[];
+  syncedAt: string;
+}
+
+export interface ERPAllocationRequest {
+  orderNumber: string;
+  serialNumbers: string[];
+  clientId: string;
+}
+
+export interface ERPIncomingOrderRequest {
+  clientId: string;
+  items: Array<{
+    deviceType: string;
+    make: string;
+    model: string;
+    serialNumber: string;
+    imei?: string;
+    conditionCode?: string;
+  }>;
+}
+
+export interface ERPOrderResponse {
+  orderNumber: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface ERPConditionCodesResponse {
+  clientId: string;
+  conditionCodes: Array<{
+    code: string;
+    description: string;
+    grade: string; // A, B, C, D
+  }>;
+}
+
 class MockERPService {
   /**
    * Create a job in ERP and get job number
@@ -155,6 +204,90 @@ class MockERPService {
     return {
       invoiceNumber,
       invoiceUrl: `https://erp.example.com/invoices/${invoiceNumber}`,
+    };
+  }
+
+  /**
+   * Sync client inventory from ReuseOS ERP
+   */
+  async syncInventory(clientId: string): Promise<ERPInventorySyncResponse> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Mock inventory items - in real implementation, this would GET from ReuseOS API
+    // For now, return empty array - actual sync will be handled by inventory service
+    return {
+      items: [],
+      syncedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Get inventory from ReuseOS ERP for a client
+   */
+  async getInventory(clientId: string): Promise<ERPInventoryItem[]> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    // Mock inventory - in real implementation, this would GET from ReuseOS API
+    return [];
+  }
+
+  /**
+   * Allocate inventory items in ReuseOS ERP
+   * Called when device is allocated to a booking
+   */
+  async allocateInventory(request: ERPAllocationRequest): Promise<void> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // In real implementation, this would POST to ReuseOS API to mark items as allocated
+    // POST /api/inventory/allocate
+    // Body: { orderNumber, serialNumbers, clientId }
+  }
+
+  /**
+   * Create incoming inventory order in ReuseOS ERP
+   * Called when leaver items are collected and received at warehouse
+   */
+  async createIncomingOrder(request: ERPIncomingOrderRequest): Promise<ERPOrderResponse> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    // Generate mock order number (same format as ITAD workflow)
+    const year = new Date().getFullYear();
+    const random = Math.floor(Math.random() * 100000);
+    const orderNumber = `INCOMING-${year}-${String(random).padStart(5, '0')}`;
+
+    return {
+      orderNumber,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Get condition codes for a client from ReuseOS ERP
+   * Condition codes are client-specific (e.g., IBMA, IBMB for IBM client)
+   */
+  async getConditionCodes(clientId: string, clientName: string): Promise<ERPConditionCodesResponse> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Generate condition codes based on client name prefix
+    // Example: IBM -> IBMA, IBMB, IBMC, IBMD
+    // Example: ASOS -> ASOA, ASOB, ASOC, ASOD
+    const prefix = clientName.substring(0, 3).toUpperCase();
+    const conditionCodes = [
+      { code: `${prefix}A`, description: 'Grade A', grade: 'A' },
+      { code: `${prefix}B`, description: 'Grade B', grade: 'B' },
+      { code: `${prefix}C`, description: 'Grade C', grade: 'C' },
+      { code: `${prefix}D`, description: 'Grade D', grade: 'D' },
+    ];
+
+    return {
+      clientId,
+      conditionCodes,
     };
   }
 }

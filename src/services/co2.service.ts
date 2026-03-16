@@ -103,4 +103,21 @@ export class CO2Service {
       where: { jobId },
     });
   }
+
+  /**
+   * Calculate CO2 per serial number based on reuse count
+   * Formula: CO2_per_user = total_CO2 / reuse_count
+   * Example: 350kg CO2 / 10 users = 35kg per user
+   */
+  async calculateSerialCO2e(
+    serialNumber: string,
+    totalCO2e: number,
+    reuseCount: number
+  ): Promise<number> {
+    if (reuseCount <= 0) {
+      return totalCO2e; // First use, full CO2 value
+    }
+    // CO2 per user = total CO2 / reuse count
+    return totalCO2e / reuseCount;
+  }
 }

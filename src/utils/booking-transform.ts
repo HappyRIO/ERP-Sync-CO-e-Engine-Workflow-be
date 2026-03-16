@@ -35,6 +35,28 @@ export interface TransformedBooking {
   gradedAt?: string;
   completedAt?: string;
   cancellationNotes?: string; // Notes from cancellation status history
+  bookingType?: 'itad_collection' | 'jml';
+  jmlSubType?: 'new_starter' | 'leaver' | 'breakfix' | 'mover';
+  employeeName?: string;
+  employeeEmail?: string;
+  employeePhone?: string;
+  startDate?: string;
+  deviceType?: string;
+  courierTracking?: string;
+  deliveryDate?: string;
+  // Mover booking specific fields
+  currentAddress?: string;
+  currentPostcode?: string;
+  currentSiteName?: string;
+  currentLat?: number;
+  currentLng?: number;
+  statusHistory?: Array<{
+    id: string;
+    status: string;
+    changedBy?: string;
+    notes?: string;
+    createdAt: string;
+  }>;
   assets?: Array<{
     id: string;
     categoryId: string;
@@ -145,6 +167,74 @@ export function transformBookingForAPI(booking: any): TransformedBooking {
       }
       return undefined;
     })(),
+    bookingType: (booking.bookingType === 'jml' ? 'jml' : 'itad_collection') as 'itad_collection' | 'jml',
+    jmlSubType: booking.jmlSubType || undefined,
+    employeeName: booking.employeeName,
+    employeeEmail: booking.employeeEmail,
+    employeePhone: booking.employeePhone,
+    startDate: booking.startDate instanceof Date
+      ? booking.startDate.toISOString()
+      : booking.startDate,
+    deviceType: booking.deviceType,
+    courierTracking: booking.courierTracking,
+    deliveryDate: booking.deliveryDate instanceof Date
+      ? booking.deliveryDate.toISOString()
+      : booking.deliveryDate,
+    // Extract current address from status history for mover bookings
+    ...(booking.jmlSubType === 'mover' && booking.statusHistory ? (() => {
+      try {
+        // Find the first status history entry that contains current address info
+        const historyWithAddress = booking.statusHistory.find((h: any) => 
+          h.notes && h.notes.includes('Current address:')
+        );
+        if (historyWithAddress?.notes) {
+          // Extract JSON object after "Current address: "
+          // The JSON string starts after "Current address: " and goes to the end or until next period
+          const addressPrefix = 'Current address: ';
+          const prefixIndex = historyWithAddress.notes.indexOf(addressPrefix);
+          if (prefixIndex !== -1) {
+            const jsonStart = prefixIndex + addressPrefix.length;
+            // Find the JSON object - it starts with { and we need to find the matching }
+            let braceCount = 0;
+            let jsonEnd = jsonStart;
+            for (let i = jsonStart; i < historyWithAddress.notes.length; i++) {
+              if (historyWithAddress.notes[i] === '{') braceCount++;
+              if (historyWithAddress.notes[i] === '}') {
+                braceCount--;
+                if (braceCount === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
+              }
+            }
+            if (jsonEnd > jsonStart) {
+              const jsonString = historyWithAddress.notes.substring(jsonStart, jsonEnd);
+              const addressInfo = JSON.parse(jsonString);
+              return {
+                currentAddress: addressInfo.currentAddress,
+                currentPostcode: addressInfo.currentPostcode,
+                currentSiteName: addressInfo.currentSiteName,
+                currentLat: addressInfo.currentLat,
+                currentLng: addressInfo.currentLng,
+              };
+            }
+          }
+        }
+      } catch (e) {
+        // If parsing fails, return empty object
+        console.error('Failed to extract currentAddress from booking statusHistory:', e);
+      }
+      return {};
+    })() : {}),
+    statusHistory: (booking.statusHistory || []).map((h: any) => ({
+      id: h.id,
+      status: transformStatus(h.status),
+      changedBy: h.changedBy,
+      notes: h.notes,
+      createdAt: h.createdAt instanceof Date
+        ? h.createdAt.toISOString()
+        : h.createdAt,
+    })),
     assets: (booking.assets || []).map((asset: any) => ({
       id: asset.id,
       categoryId: asset.categoryId,

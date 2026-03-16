@@ -5,7 +5,7 @@ import { JobRepository } from '../repositories/job.repository';
 import { CO2Service } from './co2.service';
 import { BuybackService } from './buyback.service';
 import { mockERPService } from './mock-erp.service';
-import { isValidBookingTransition, isValidJobTransition } from '../middleware/workflow';
+import { isValidBookingTransition, isValidJobTransition, isValidBookingTransitionForType } from '../middleware/workflow';
 import { ValidationError, NotFoundError } from '../utils/errors';
 import { BookingStatus, JobStatus } from '../types';
 import { calculateTravelEmissions } from '../utils/co2';
@@ -37,6 +37,8 @@ export class BookingService {
     resellerId?: string;
     resellerName?: string;
     createdBy: string;
+    bookingType?: 'itad_collection' | 'jml';
+    jmlSubType?: 'new_starter' | 'leaver' | 'breakfix' | 'mover';
   }) {
     // Calculate CO2e
     const co2Result = await co2Service.calculateBookingCO2e({
@@ -172,6 +174,8 @@ export class BookingService {
       resellerId: data.resellerId,
       resellerName: data.resellerName,
       createdBy: data.createdBy,
+      bookingType: data.bookingType || 'itad_collection',
+      jmlSubType: data.jmlSubType,
     });
 
     // Create booking assets
@@ -436,6 +440,15 @@ export class BookingService {
             sanitisedAt: true,
             gradedAt: true,
             completedAt: true,
+            bookingType: true,
+            jmlSubType: true,
+            employeeName: true,
+            employeeEmail: true,
+            employeePhone: true,
+            startDate: true,
+            deviceType: true,
+            courierTracking: true,
+            deliveryDate: true,
             client: {
               select: {
                 id: true,
@@ -478,6 +491,15 @@ export class BookingService {
                 erpJobNumber: true,
                 status: true,
               },
+            },
+            statusHistory: {
+              select: {
+                id: true,
+                status: true,
+                notes: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'desc' },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -546,6 +568,15 @@ export class BookingService {
             sanitisedAt: true,
             gradedAt: true,
             completedAt: true,
+            bookingType: true,
+            jmlSubType: true,
+            employeeName: true,
+            employeeEmail: true,
+            employeePhone: true,
+            startDate: true,
+            deviceType: true,
+            courierTracking: true,
+            deliveryDate: true,
             client: {
               select: {
                 id: true,
@@ -588,6 +619,15 @@ export class BookingService {
                 erpJobNumber: true,
                 status: true,
               },
+            },
+            statusHistory: {
+              select: {
+                id: true,
+                status: true,
+                notes: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'desc' },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -945,15 +985,65 @@ export class BookingService {
   ) {
     const booking = await this.getBookingById(bookingId);
 
-    if (!isValidBookingTransition(booking.status, newStatus)) {
+    // Always use type-specific validation
+    // Ensure bookingType is correctly set - if it's null/undefined, check if it should be JML based on other fields
+    let bookingType: 'itad_collection' | 'jml' = booking.bookingType || 'itad_collection';
+    let jmlSubType = booking.jmlSubType;
+    
+    // If bookingType is 'jml' but jmlSubType is missing, this is an error
+    if (bookingType === 'jml' && !jmlSubType) {
+      const { logger } = await import('../utils/logger');
+      logger.error('JML booking missing jmlSubType', {
+        bookingId,
+        bookingType: booking.bookingType,
+        jmlSubType: booking.jmlSubType,
+      });
       throw new ValidationError(
-        `Invalid status transition from "${booking.status}" to "${newStatus}"`
+        'JML booking is missing jmlSubType. Please update the booking to include the JML sub-type.'
+      );
+    }
+    
+    // Debug logging to verify booking type is being read correctly
+    const { logger } = await import('../utils/logger');
+    logger.info('Booking status update validation', {
+      bookingId,
+      currentStatus: booking.status,
+      newStatus,
+      bookingType,
+      jmlSubType,
+      bookingTypeFromDB: booking.bookingType,
+      jmlSubTypeFromDB: booking.jmlSubType,
+    });
+    
+    const isValid = isValidBookingTransitionForType(
+      booking.status, 
+      newStatus, 
+      bookingType, 
+      jmlSubType
+    );
+
+    if (!isValid) {
+      const bookingTypeLabel = bookingType === 'jml' && jmlSubType
+        ? `${bookingType} (${jmlSubType})`
+        : bookingType;
+      logger.warn('Invalid booking status transition', {
+        bookingId,
+        from: booking.status,
+        to: newStatus,
+        bookingType,
+        jmlSubType,
+      });
+      throw new ValidationError(
+        `Invalid status transition from "${booking.status}" to "${newStatus}" for booking type "${bookingTypeLabel}"`
       );
     }
 
     // Update booking with appropriate timestamp
     const updateData: any = { status: newStatus };
     if (newStatus === 'scheduled' && !booking.scheduledAt) {
+      updateData.scheduledAt = new Date();
+    } else if (newStatus === 'delivery_scheduled') {
+      // For Breakfix re-delivery, update scheduledAt (re-use the same field)
       updateData.scheduledAt = new Date();
     } else if (newStatus === 'collected' && !booking.collectedAt) {
       updateData.collectedAt = new Date();

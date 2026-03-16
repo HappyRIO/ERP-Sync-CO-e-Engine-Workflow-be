@@ -26,6 +26,7 @@ import organisationProfileRoutes from './routes/organisation-profile.routes';
 import documentRoutes from './routes/document.routes';
 import siteRoutes from './routes/site.routes';
 import uploadsRoutes from './routes/uploads.routes';
+import inventoryRoutes from './routes/inventory.routes';
 
 const app: Express = express();
 
@@ -237,6 +238,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/organisation-profile', organisationProfileRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/sites', siteRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

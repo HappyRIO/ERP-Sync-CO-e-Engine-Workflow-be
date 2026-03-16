@@ -1,14 +1,16 @@
 // Utility to sync booking and job statuses for existing data
 import prisma from '../config/database';
 import { BookingStatus, JobStatus } from '../types';
-import { isValidBookingTransition, isValidJobTransition } from '../middleware/workflow';
+import { isValidBookingTransition, isValidJobTransition, isValidBookingTransitionForType, isValidJobTransitionForType } from '../middleware/workflow';
 
 /**
  * Map job status to booking status
  */
 function mapJobStatusToBookingStatus(jobStatus: JobStatus): BookingStatus | null {
-  if (jobStatus === 'collected' || jobStatus === 'warehouse') {
+  if (jobStatus === 'collected') {
     return 'collected';
+  } else if (jobStatus === 'warehouse') {
+    return 'warehouse';
   } else if (jobStatus === 'sanitised') {
     return 'sanitised';
   } else if (jobStatus === 'graded') {
@@ -33,6 +35,12 @@ function mapBookingStatusToJobStatus(bookingStatus: BookingStatus, currentJobSta
       return null; // Don't update
     }
     return 'collected';
+  } else if (bookingStatus === 'warehouse') {
+    // If job is already at sanitised or beyond, keep it; otherwise set to warehouse
+    if (['sanitised', 'graded', 'completed'].includes(currentJobStatus)) {
+      return null; // Don't update
+    }
+    return 'warehouse';
   } else if (bookingStatus === 'sanitised') {
     return 'sanitised';
   } else if (bookingStatus === 'graded') {
@@ -70,9 +78,11 @@ export async function syncAllStatuses() {
     let updated = false;
 
     // Sync booking status from job status
+    const bookingType = booking.bookingType || 'itad_collection';
+    const jmlSubType = booking.jmlSubType;
     const targetBookingStatus = mapJobStatusToBookingStatus(job.status);
     if (targetBookingStatus && booking.status !== targetBookingStatus) {
-      if (isValidBookingTransition(booking.status, targetBookingStatus)) {
+      if (isValidBookingTransitionForType(booking.status, targetBookingStatus, bookingType, jmlSubType)) {
         const updateData: any = { status: targetBookingStatus };
         
         // Set appropriate timestamps
@@ -111,9 +121,11 @@ export async function syncAllStatuses() {
 
     // Sync job status from booking status (only if booking was not just updated)
     if (!updated) {
+      const bookingType = booking.bookingType || 'itad_collection';
+      const jmlSubType = booking.jmlSubType;
       const targetJobStatus = mapBookingStatusToJobStatus(booking.status, job.status);
       if (targetJobStatus && job.status !== targetJobStatus) {
-        if (isValidJobTransition(job.status, targetJobStatus)) {
+        if (isValidJobTransitionForType(job.status, targetJobStatus, bookingType, jmlSubType)) {
           const updateData: any = { status: targetJobStatus };
           
           if (targetJobStatus === 'completed' && !job.completedDate) {

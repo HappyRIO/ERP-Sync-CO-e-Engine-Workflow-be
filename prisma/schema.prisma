@@ -71,14 +71,16 @@ model Tenant {
   updatedAt    DateTime @updatedAt
 
   // Relations
-  users         User[]
-  clients       Client[]
-  bookings      Booking[]
-  jobs          Job[]
-  sites         Site[]
-  notifications Notification[]
-  documents     Document[]
-  vehicles      Vehicle[]
+  users              User[]
+  clients            Client[]
+  bookings           Booking[]
+  jobs               Job[]
+  sites              Site[]
+  notifications      Notification[]
+  documents          Document[]
+  vehicles           Vehicle[]
+  clientInventory    ClientInventory[]
+  serialReuseHistory SerialReuseHistory[]
 
   @@index([slug])
 }
@@ -101,8 +103,10 @@ model Client {
   updatedAt          DateTime     @updatedAt
 
   // Relations
-  bookings Booking[]
-  sites    Site[]
+  bookings         Booking[]
+  sites            Site[]
+  inventory        ClientInventory[]
+  serialReuseHistory SerialReuseHistory[]
 
   @@index([tenantId])
   @@index([resellerId])
@@ -112,6 +116,27 @@ enum ClientStatus {
   active
   inactive
   pending
+}
+
+enum BookingType {
+  itad_collection
+  jml
+}
+
+enum JMLSubType {
+  new_starter
+  leaver
+  breakfix
+  mover
+}
+
+enum InventoryStatus {
+  available
+  allocated
+  in_transit
+  delivered
+  collected
+  warehouse
 }
 
 // Sites (Collection locations)
@@ -202,11 +227,22 @@ model Booking {
   sanitisedAt            DateTime?
   gradedAt               DateTime?
   completedAt            DateTime?
+  // JML-specific fields
+  bookingType            BookingType   @default(itad_collection)
+  jmlSubType             JMLSubType?
+  employeeName           String?       // For JML bookings
+  employeeEmail          String?       // For leaver personal email
+  employeePhone          String?       // For JML bookings
+  startDate              DateTime?     // For new starter (min 5 days)
+  deviceType             String?       // Windows/Apple for new starter
+  courierTracking        String?       // Tracking number
+  deliveryDate           DateTime?     // When delivered/collected
 
   // Relations
-  assets        BookingAsset[]
-  statusHistory BookingStatusHistory[]
-  documents     Document[]             @relation("BookingDocuments")
+  assets                 BookingAsset[]
+  statusHistory          BookingStatusHistory[]
+  documents              Document[]             @relation("BookingDocuments")
+  serialReuseHistory     SerialReuseHistory[]
 
   @@index([clientId])
   @@index([tenantId])
@@ -223,10 +259,21 @@ enum BookingStatus {
   created
   scheduled
   collected
+  warehouse
   sanitised
   graded
   completed
   cancelled
+  // JML-specific statuses
+  device_allocated
+  courier_booked
+  in_transit
+  delivered
+  collection_scheduled
+  // Breakfix re-delivery statuses
+  delivery_scheduled
+  // Leaver post-grading statuses
+  inventory
 }
 
 // Booking Assets
@@ -292,14 +339,15 @@ model Job {
   updatedAt                  DateTime  @updatedAt
 
   // Relations
-  assets         JobAsset[]
-  statusHistory  JobStatusHistory[]
-  evidence       Evidence[] // Multiple evidence records (one per status)
-  certificates   Certificate[]
-  co2Results     CO2Result[]
-  buybackResults BuybackResult[]
-  financeStatus  FinanceStatus?
-  documents      Document[]
+  assets              JobAsset[]
+  statusHistory       JobStatusHistory[]
+  evidence            Evidence[] // Multiple evidence records (one per status)
+  certificates        Certificate[]
+  co2Results          CO2Result[]
+  buybackResults      BuybackResult[]
+  financeStatus       FinanceStatus?
+  documents           Document[]
+  serialReuseHistory  SerialReuseHistory[]
 
   @@index([bookingId])
   @@index([tenantId])
@@ -318,11 +366,18 @@ enum JobStatus {
   en_route
   arrived
   collected
+  in_transit
   warehouse
   sanitised
   graded
   completed
   cancelled
+  // Breakfix re-delivery statuses
+  delivery_routed
+  delivery_en_route
+  delivery_arrived
+  // Leaver post-grading statuses
+  inventory
 }
 
 // Job Assets
@@ -334,16 +389,20 @@ model JobAsset {
   category             AssetCategory @relation(fields: [categoryId], references: [id])
   categoryName         String
   quantity             Int
-  serialNumbers        String[]      @default([])
-  grade                String? // A, B, C, D, Recycled
-  weight               Float?
-  sanitised            Boolean       @default(false)
-  wipeMethod           String?
-  sanitisationRecordId String?
-  gradingRecordId      String?
-  resaleValue          Float?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  serialNumbers         String[]      @default([])
+  grade                 String? // A, B, C, D, Recycled
+  weight                Float?
+  sanitised             Boolean       @default(false)
+  wipeMethod            String?
+  sanitisationRecordId  String?
+  gradingRecordId       String?
+  resaleValue           Float?
+  // JML-specific fields
+  allocatedSerialNumber String?       // Serial allocated from inventory
+  imei                  String?       // For mobile phones
+  accessories           String[]      @default([]) // PSU, charger, etc.
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   @@index([jobId])
   @@index([categoryId])
@@ -630,4 +689,60 @@ model TwoFactorCode {
   @@index([code])
   @@index([expiresAt])
   @@index([userId, used])
+}
+
+// Client Inventory (laptops and mobile phones)
+model ClientInventory {
+  id              String           @id @default(uuid())
+  clientId        String
+  client          Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tenantId        String
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  deviceType      String           // laptop, mobile_phone
+  make            String
+  model           String
+  serialNumber    String
+  imei            String?          // For mobile phones
+  conditionCode   String           // IBMA, IBMB, etc. (synced from ReuseOS)
+  erpInventoryId  String?          // Reference to ReuseOS inventory ID
+  status          InventoryStatus  @default(available)
+  allocatedTo     String?          // Booking ID if allocated
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  lastSyncedAt    DateTime?        // Last sync with ReuseOS
+  
+  @@unique([clientId, serialNumber])
+  @@index([clientId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([conditionCode])
+  @@index([erpInventoryId])
+  @@index([allocatedTo])
+}
+
+// Serial Reuse History (track CO2 savings per serial number)
+model SerialReuseHistory {
+  id              String       @id @default(uuid())
+  serialNumber    String
+  clientId        String
+  client          Client       @relation(fields: [clientId], references: [id])
+  tenantId        String
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  bookingId       String
+  booking         Booking      @relation(fields: [bookingId], references: [id])
+  jobId           String?
+  job             Job?         @relation(fields: [jobId], references: [id])
+  bookingType     BookingType
+  jmlSubType      JMLSubType?
+  reuseCount      Int          @default(1) // How many times this serial has been reused
+  co2eSaved       Float        // CO2 saved for this reuse instance
+  allocatedDate   DateTime
+  returnedDate    DateTime?
+  createdAt       DateTime     @default(now())
+  
+  @@index([serialNumber])
+  @@index([clientId])
+  @@index([bookingId])
+  @@index([jobId])
+  @@index([tenantId])
 }

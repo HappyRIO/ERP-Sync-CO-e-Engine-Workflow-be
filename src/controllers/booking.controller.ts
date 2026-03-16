@@ -1,10 +1,12 @@
 import { Response, NextFunction } from 'express';
 import { BookingService } from '../services/booking.service';
+import { JMLBookingService } from '../services/jml-booking.service';
 import { AuthenticatedRequest, ApiResponse } from '../types';
 import { transformBookingForAPI, transformBookingsForAPI } from '../utils/booking-transform';
 import prisma from '../config/database';
 
 const bookingService = new BookingService();
+const jmlBookingService = new JMLBookingService();
 
 export class BookingController {
   async create(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -299,6 +301,421 @@ export class BookingController {
       return res.json({
         success: true,
         data: { isUnique, erpJobNumber: erpJobNumber.trim() },
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/jml/new-starter
+   * Create new starter booking
+   */
+  async createNewStarter(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const {
+        clientId,
+        clientName,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        startDate,
+        deviceType,
+        siteName,
+        devices,
+        lat,
+        lng,
+      } = req.body;
+
+      // For client role, don't pass clientId (service will find/create Client)
+      // For admin/reseller, use provided clientId
+      const bookingClientId = req.user.role === 'client' ? undefined : (clientId || undefined);
+      const bookingClientName = clientName || 'Client';
+
+      const booking = await jmlBookingService.createNewStarterBooking({
+        clientId: bookingClientId,
+        clientName: bookingClientName,
+        tenantId: req.user.tenantId,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        startDate: new Date(startDate),
+        deviceType,
+        siteName,
+        devices: devices || [],
+        lat,
+        lng,
+        createdBy: req.user.userId,
+      });
+
+      const transformedBooking = transformBookingForAPI(booking as any);
+      return res.status(201).json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/jml/leaver
+   * Create leaver booking
+   */
+  async createLeaver(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const {
+        clientId,
+        clientName,
+        leaverName,
+        address,
+        postcode,
+        personalEmail,
+        phone,
+        leavingDate,
+        siteName,
+        devices,
+        lat,
+        lng,
+        charityPercent,
+        preferredVehicleType,
+        assets,
+      } = req.body;
+
+      // For client role, don't pass clientId (service will find/create Client)
+      // For admin/reseller, use provided clientId
+      const bookingClientId = req.user.role === 'client' ? undefined : (clientId || undefined);
+      const bookingClientName = clientName || 'Client';
+
+      const booking = await jmlBookingService.createLeaverBooking({
+        clientId: bookingClientId,
+        clientName: bookingClientName,
+        tenantId: req.user.tenantId,
+        leaverName,
+        address,
+        postcode,
+        personalEmail,
+        phone,
+        leavingDate: new Date(leavingDate),
+        siteName,
+        devices: devices || [],
+        lat,
+        lng,
+        charityPercent,
+        preferredVehicleType,
+        assets,
+        createdBy: req.user.userId,
+      });
+
+      const transformedBooking = transformBookingForAPI(booking as any);
+      return res.status(201).json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/jml/breakfix
+   * Create breakfix booking
+   */
+  async createBreakfix(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const {
+        clientId,
+        clientName,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        siteName,
+        brokenDevices,
+        deviceType,
+        lat,
+        lng,
+      } = req.body;
+
+      if (!brokenDevices || !Array.isArray(brokenDevices) || brokenDevices.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'brokenDevices array is required and must not be empty',
+        } as ApiResponse);
+      }
+
+      // For client role, don't pass clientId (service will find/create Client)
+      // For admin/reseller, use provided clientId
+      const bookingClientId = req.user.role === 'client' ? undefined : (clientId || undefined);
+      const bookingClientName = clientName || 'Client';
+
+      const booking = await jmlBookingService.createBreakfixBooking({
+        clientId: bookingClientId,
+        clientName: bookingClientName,
+        tenantId: req.user.tenantId,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        siteName,
+        brokenDevices,
+        deviceType,
+        lat,
+        lng,
+        createdBy: req.user.userId,
+      });
+
+      const transformedBooking = transformBookingForAPI(booking as any);
+      return res.status(201).json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/jml/mover
+   * Create mover booking
+   */
+  async createMover(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const {
+        clientId,
+        clientName,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        siteName,
+        scheduledDate,
+        currentAddress,
+        currentPostcode,
+        currentSiteName,
+        currentDevices,
+        deviceType,
+        currentLat,
+        currentLng,
+        lat,
+        lng,
+      } = req.body;
+
+      if (!currentDevices || !Array.isArray(currentDevices) || currentDevices.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'currentDevices array is required and must not be empty',
+        } as ApiResponse);
+      }
+
+      // For client role, don't pass clientId (service will find/create Client)
+      // For admin/reseller, use provided clientId
+      const bookingClientId = req.user.role === 'client' ? undefined : (clientId || undefined);
+      const bookingClientName = clientName || 'Client';
+
+      const booking = await jmlBookingService.createMoverBooking({
+        clientId: bookingClientId,
+        clientName: bookingClientName,
+        tenantId: req.user.tenantId,
+        employeeName,
+        email,
+        address,
+        postcode,
+        phone,
+        siteName,
+        scheduledDate: scheduledDate ? new Date(scheduledDate) : new Date(),
+        currentAddress,
+        currentPostcode,
+        currentSiteName,
+        currentDevices,
+        deviceType,
+        currentLat,
+        currentLng,
+        lat,
+        lng,
+        createdBy: req.user.userId,
+      });
+
+      const transformedBooking = transformBookingForAPI(booking as any);
+      return res.status(201).json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/bookings/:id/allocate-device
+   * Allocate device from inventory to booking (admin only)
+   */
+  async allocateDevice(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const { serialNumber } = req.body;
+
+      if (!serialNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'serialNumber is required',
+        } as ApiResponse);
+      }
+
+      const booking = await jmlBookingService.allocateDevice(id, serialNumber, req.user.userId);
+      const transformedBooking = transformBookingForAPI(booking as any);
+
+      return res.json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/bookings/:id/courier-tracking
+   * Update courier tracking number (admin only)
+   */
+  async updateCourierTracking(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const { trackingNumber } = req.body;
+
+      if (!trackingNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'trackingNumber is required',
+        } as ApiResponse);
+      }
+
+      const booking = await jmlBookingService.updateCourierTracking(id, trackingNumber, req.user.userId);
+      const transformedBooking = transformBookingForAPI(booking as any);
+
+      return res.json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/bookings/:id/mark-delivered
+   * Mark booking as delivered (admin only)
+   */
+  async markDelivered(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const booking = await jmlBookingService.markDelivered(id, req.user.userId);
+      const transformedBooking = transformBookingForAPI(booking as any);
+
+      return res.json({
+        success: true,
+        data: transformedBooking,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/bookings/:id/mark-collected
+   * Mark booking as collected and log items (admin only)
+   */
+  async markCollected(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const { items } = req.body;
+
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'items array is required and must not be empty',
+        } as ApiResponse);
+      }
+
+      // Validate items
+      for (const item of items) {
+        if (!item.make || !item.model || !item.serialNumber) {
+          return res.status(400).json({
+            success: false,
+            error: 'Each item must have make, model, and serialNumber',
+          } as ApiResponse);
+        }
+      }
+
+      const booking = await jmlBookingService.markCollected(id, items, req.user.userId);
+      const transformedBooking = transformBookingForAPI(booking as any);
+
+      return res.json({
+        success: true,
+        data: transformedBooking,
       } as ApiResponse);
     } catch (error) {
       return next(error);

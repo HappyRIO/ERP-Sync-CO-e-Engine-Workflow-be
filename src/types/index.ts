@@ -9,10 +9,22 @@ export type BookingStatus =
   | 'created' 
   | 'scheduled' 
   | 'collected' 
+  | 'warehouse'
   | 'sanitised' 
   | 'graded' 
   | 'completed' 
-  | 'cancelled';
+  | 'cancelled'
+  | 'device_allocated'
+  | 'courier_booked'
+  | 'in_transit'
+  | 'delivered'
+  | 'collection_scheduled'
+  | 'delivery_scheduled' // Breakfix re-delivery scheduling
+  | 'inventory'; // Leaver: added to inventory (handles both reuse and disposal)
+
+export type BookingType = 'itad_collection' | 'jml';
+
+export type JMLSubType = 'new_starter' | 'leaver' | 'breakfix' | 'mover';
 
 export type JobStatus = 
   | 'booked' 
@@ -20,11 +32,16 @@ export type JobStatus =
   | 'en_route' 
   | 'arrived' 
   | 'collected' 
+  | 'in_transit'
   | 'warehouse' 
   | 'sanitised' 
   | 'graded' 
   | 'completed' 
-  | 'cancelled';
+  | 'cancelled'
+  | 'delivery_routed'   // Breakfix re-delivery routing
+  | 'delivery_en_route' // Breakfix re-delivery en route
+  | 'delivery_arrived' // Breakfix re-delivery arrival
+  | 'inventory'; // Leaver: added to inventory (handles both reuse and disposal)
 
 export type CertificateType = 
   | 'chain_of_custody' 

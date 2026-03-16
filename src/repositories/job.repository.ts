@@ -10,6 +10,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -49,6 +52,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -88,6 +94,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -141,6 +150,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -184,6 +196,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -235,6 +250,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
@@ -295,6 +313,9 @@ export class JobRepository {
           include: { 
             client: true,
             site: true,
+            statusHistory: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         assets: {
