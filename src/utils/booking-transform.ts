@@ -43,6 +43,7 @@ export interface TransformedBooking {
   startDate?: string;
   deviceType?: string;
   courierTracking?: string;
+  courierService?: string;
   deliveryDate?: string;
   // Mover booking specific fields
   currentAddress?: string;
@@ -75,10 +76,17 @@ function transformStatus(status: BookingStatus): string {
     'created': 'created',
     'scheduled': 'scheduled',
     'collected': 'collected',
+    'warehouse': 'warehouse',
     'sanitised': 'sanitised',
     'graded': 'graded',
     'completed': 'completed',
     'cancelled': 'cancelled',
+    'device_allocated': 'device_allocated',
+    'courier_booked': 'courier_booked',
+    'dispatched': 'dispatched',
+    'delivered': 'delivered',
+    'collection_scheduled': 'collection_scheduled',
+    'inventory': 'inventory',
   };
   
   return statusMap[status] || status;
@@ -100,6 +108,13 @@ function transformJobStatus(status: JobStatus): string {
     'graded': 'graded',
     'completed': 'completed',
     'cancelled': 'cancelled',
+    'device_allocated': 'device-allocated',
+    'courier_booked': 'courier-booked',
+    'dispatched': 'dispatched',
+    'delivered': 'delivered',
+    'delivery_courier_booked': 'delivery-courier-booked',
+    'delivery_dispatched': 'delivery-dispatched',
+    'inventory': 'inventory',
   };
 
   return statusMap[status] || status;
@@ -177,6 +192,7 @@ export function transformBookingForAPI(booking: any): TransformedBooking {
       : booking.startDate,
     deviceType: booking.deviceType,
     courierTracking: booking.courierTracking,
+    courierService: booking.courierService,
     deliveryDate: booking.deliveryDate instanceof Date
       ? booking.deliveryDate.toISOString()
       : booking.deliveryDate,

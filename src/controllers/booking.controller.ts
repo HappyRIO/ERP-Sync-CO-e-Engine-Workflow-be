@@ -583,7 +583,8 @@ export class BookingController {
 
   /**
    * PATCH /api/bookings/:id/allocate-device
-   * Allocate device from inventory to booking (admin only)
+   * Allocate device(s) to a JML booking
+   * Supports both single device allocation (serialNumber) and bulk allocation (category, make, model, deviceType, quantity)
    */
   async allocateDevice(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
@@ -595,12 +596,44 @@ export class BookingController {
       }
 
       const { id } = req.params;
-      const { serialNumber } = req.body;
+      const { serialNumber, category, make, model, deviceType, quantity } = req.body;
 
+      // Check if using new bulk allocation method
+      if (category && make && model && quantity) {
+        if (!quantity || quantity < 1) {
+          return res.status(400).json({
+            success: false,
+            error: 'quantity must be at least 1',
+          } as ApiResponse);
+        }
+
+        const result = await jmlBookingService.allocateDevicesByCriteria(
+          id,
+          category,
+          make,
+          model,
+          deviceType || null,
+          quantity,
+          req.user.userId
+        );
+
+        const transformedBooking = transformBookingForAPI(result.booking as any);
+
+        return res.json({
+          success: true,
+          data: {
+            booking: transformedBooking,
+            allocatedSerialNumbers: result.allocatedSerialNumbers,
+            quantity: result.quantity,
+          },
+        } as ApiResponse);
+      }
+
+      // Legacy single device allocation by serialNumber
       if (!serialNumber) {
         return res.status(400).json({
           success: false,
-          error: 'serialNumber is required',
+          error: 'Either serialNumber or (category, make, model, quantity) is required',
         } as ApiResponse);
       }
 
@@ -609,7 +642,11 @@ export class BookingController {
 
       return res.json({
         success: true,
-        data: transformedBooking,
+        data: {
+          booking: transformedBooking,
+          allocatedSerialNumbers: [serialNumber],
+          quantity: 1,
+        },
       } as ApiResponse);
     } catch (error) {
       return next(error);
@@ -630,7 +667,7 @@ export class BookingController {
       }
 
       const { id } = req.params;
-      const { trackingNumber } = req.body;
+      const { trackingNumber, courierService } = req.body;
 
       if (!trackingNumber) {
         return res.status(400).json({
@@ -639,7 +676,14 @@ export class BookingController {
         } as ApiResponse);
       }
 
-      const booking = await jmlBookingService.updateCourierTracking(id, trackingNumber, req.user.userId);
+      if (!courierService) {
+        return res.status(400).json({
+          success: false,
+          error: 'courierService is required',
+        } as ApiResponse);
+      }
+
+      const booking = await jmlBookingService.updateCourierTracking(id, trackingNumber, courierService, req.user.userId);
       const transformedBooking = transformBookingForAPI(booking as any);
 
       return res.json({

@@ -91,6 +91,13 @@ function transformStatus(status: JobStatus): string {
     'graded': 'graded',
     'completed': 'completed',
     'cancelled': 'cancelled',
+    'device_allocated': 'device-allocated',
+    'courier_booked': 'courier-booked',
+    'dispatched': 'dispatched',
+    'delivered': 'delivered',
+    'delivery_courier_booked': 'delivery-courier-booked',
+    'delivery_dispatched': 'delivery-dispatched',
+    'inventory': 'inventory',
   };
   
   return statusMap[status] || status;

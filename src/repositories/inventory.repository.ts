@@ -6,46 +6,47 @@ export class InventoryRepository {
     return prisma.clientInventory.findUnique({
       where: { id },
       include: {
-        client: true,
         tenant: true,
       },
     });
   }
 
-  async findByClient(clientId: string) {
+  async findByAllocatedClient(clientId: string) {
     return prisma.clientInventory.findMany({
-      where: { clientId },
+      where: { allocatedTo: clientId },
       include: {
-        client: true,
         tenant: true,
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findBySerial(clientId: string, serialNumber: string) {
-    return prisma.clientInventory.findUnique({
+  async findBySerial(tenantId: string, serialNumber: string) {
+    return prisma.clientInventory.findFirst({
       where: {
-        clientId_serialNumber: {
-          clientId,
-          serialNumber,
-        },
+        tenantId,
+        serialNumber,
       },
       include: {
-        client: true,
         tenant: true,
       },
     });
   }
 
-  async findAvailable(clientId: string, deviceType?: string, conditionCode?: string) {
+  async findAvailable(allocatedTo: string | null, tenantId: string, category?: string, conditionCode?: string) {
     const where: any = {
-      clientId,
+      tenantId,
       status: 'available',
     };
 
-    if (deviceType) {
-      where.deviceType = deviceType;
+    // If allocatedTo is provided, filter by it; otherwise don't filter by allocatedTo (shows all available)
+    if (allocatedTo !== null && allocatedTo !== undefined) {
+      where.allocatedTo = allocatedTo;
+    }
+    // If allocatedTo is null/undefined, don't add it to where clause (shows all available inventory)
+
+    if (category) {
+      where.category = category;
     }
 
     if (conditionCode) {
@@ -55,7 +56,44 @@ export class InventoryRepository {
     return prisma.clientInventory.findMany({
       where,
       include: {
-        client: true,
+        tenant: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findAll(allocatedTo: string | null | undefined, tenantId: string, category?: string, conditionCode?: string, status?: string) {
+    const where: any = {
+      tenantId,
+    };
+
+    // If allocatedTo is provided, filter by it
+    // If allocatedTo is null, show only unallocated (allocatedTo IS NULL)
+    // If allocatedTo is undefined, don't filter by allocatedTo (show all)
+    if (allocatedTo !== undefined) {
+      if (allocatedTo !== null) {
+        where.allocatedTo = allocatedTo;
+      } else {
+        where.allocatedTo = null;
+      }
+    }
+    // If allocatedTo is undefined, don't add it to where clause (shows all)
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (conditionCode) {
+      where.conditionCode = conditionCode;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    return prisma.clientInventory.findMany({
+      where,
+      include: {
         tenant: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -66,16 +104,15 @@ export class InventoryRepository {
     return prisma.clientInventory.findFirst({
       where: { erpInventoryId },
       include: {
-        client: true,
         tenant: true,
       },
     });
   }
 
   async create(data: {
-    clientId: string;
     tenantId: string;
-    deviceType: string;
+    category: string;
+    deviceType?: string | null;
     make: string;
     model: string;
     serialNumber: string;
@@ -83,20 +120,26 @@ export class InventoryRepository {
     conditionCode: string;
     erpInventoryId?: string;
     status?: InventoryStatus;
+    allocatedTo?: string | null;
   }) {
+    // Ensure deviceType is explicitly null (not undefined) if not provided
+    const normalizedData = {
+      ...data,
+      deviceType: data.deviceType === undefined ? null : data.deviceType,
+    };
+    
     return prisma.clientInventory.create({
-      data,
+      data: normalizedData,
       include: {
-        client: true,
         tenant: true,
       },
     });
   }
 
   async createMany(items: Array<{
-    clientId: string;
     tenantId: string;
-    deviceType: string;
+    category: string;
+    deviceType?: string | null;
     make: string;
     model: string;
     serialNumber: string;
@@ -104,15 +147,23 @@ export class InventoryRepository {
     conditionCode: string;
     erpInventoryId?: string;
     status?: InventoryStatus;
+    allocatedTo?: string | null;
   }>) {
+    // Ensure deviceType is explicitly null (not undefined) for non-laptop/desktop categories
+    const normalizedItems = items.map(item => ({
+      ...item,
+      deviceType: item.deviceType === undefined ? null : item.deviceType,
+    }));
+    
     return prisma.clientInventory.createMany({
-      data: items,
-      skipDuplicates: true, // Skip if serial number already exists
+      data: normalizedItems,
+      skipDuplicates: true, // Skip if serial number already exists (based on tenantId_serialNumber unique constraint)
     });
   }
 
   async update(id: string, data: {
-    deviceType?: string;
+    category?: string;
+    deviceType?: string | null;
     make?: string;
     model?: string;
     imei?: string;
@@ -126,14 +177,14 @@ export class InventoryRepository {
       where: { id },
       data,
       include: {
-        client: true,
         tenant: true,
       },
     });
   }
 
-  async updateBySerial(clientId: string, serialNumber: string, data: {
-    deviceType?: string;
+  async updateBySerial(tenantId: string, serialNumber: string, data: {
+    category?: string;
+    deviceType?: string | null;
     make?: string;
     model?: string;
     imei?: string;
@@ -143,16 +194,14 @@ export class InventoryRepository {
     allocatedTo?: string | null;
     lastSyncedAt?: Date;
   }) {
+    const item = await this.findBySerial(tenantId, serialNumber);
+    if (!item) {
+      throw new Error(`Inventory item not found: ${serialNumber} in tenant ${tenantId}`);
+    }
     return prisma.clientInventory.update({
-      where: {
-        clientId_serialNumber: {
-          clientId,
-          serialNumber,
-        },
-      },
+      where: { id: item.id },
       data,
       include: {
-        client: true,
         tenant: true,
       },
     });
@@ -164,8 +213,8 @@ export class InventoryRepository {
     });
   }
 
-  async count(clientId: string, status?: InventoryStatus) {
-    const where: any = { clientId };
+  async count(allocatedTo: string | null, status?: InventoryStatus) {
+    const where: any = { allocatedTo };
     if (status) {
       where.status = status;
     }

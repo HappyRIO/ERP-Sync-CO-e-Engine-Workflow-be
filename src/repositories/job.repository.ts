@@ -144,7 +144,7 @@ export class JobRepository {
     driverId?: string;
   }) {
     return prisma.job.create({
-      data,
+      data: data as any, // Type assertion needed due to Prisma enum type mismatch
       include: {
         booking: {
           include: { 
@@ -190,7 +190,7 @@ export class JobRepository {
   }) {
     return prisma.job.update({
       where: { id },
-      data,
+      data: data as any, // Type assertion needed due to Prisma enum type mismatch
       include: {
         booking: {
           include: { 
@@ -236,12 +236,16 @@ export class JobRepository {
     limit?: number;
     offset?: number;
   }) {
-    const where: any = { driverId };
+    const where: any = { 
+      driverId,
+      booking: {
+        bookingType: 'itad_collection', // Drivers only see ITAD collection jobs, not JML jobs
+      },
+    };
     if (filters?.status) {
       where.status = filters.status;
     }
-    // No default filtering - drivers can see all their jobs for history
-    // Access restriction is handled at the UI level (DriverJobView)
+    // Drivers can only see ITAD collection jobs (JML jobs are handled by couriers)
 
     return prisma.job.findMany({
       where,

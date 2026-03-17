@@ -12,13 +12,80 @@ import { calculateRoadDistance } from '../utils/routing';
 import { kmToMiles } from '../utils/co2';
 import { config } from '../config/env';
 import prisma from '../config/database';
-import { BookingStatus, BookingType, JMLSubType } from '@prisma/client';
+import { BookingStatus, BookingType, JMLSubType, JobStatus } from '@prisma/client';
+import { getNextValidBookingStatusesForType } from '../middleware/workflow';
+import { JobRepository } from '../repositories/job.repository';
+import { JobService } from './job.service';
 
 const bookingRepo = new BookingRepository();
+const jobRepo = new JobRepository();
 const inventoryService = new InventorySyncService();
 const serialReuseService = new SerialReuseService();
 const co2Service = new CO2Service();
 const buybackService = new BuybackService();
+
+const jobService = new JobService();
+
+async function syncJobStatusFromBooking(
+  bookingId: string,
+  newStatus: BookingStatus,
+  changedBy: string
+) {
+  const job = await jobRepo.findByBookingId(bookingId);
+  if (!job) {
+    return;
+  }
+
+  let targetJobStatus: JobStatus | null = null;
+
+  if (newStatus === 'created') {
+    targetJobStatus = 'booked';
+  } else if (newStatus === 'scheduled') {
+    targetJobStatus = 'routed';
+  } else if (newStatus === 'collected') {
+    if (['warehouse', 'sanitised', 'graded', 'completed', 'inventory'].includes(job.status as JobStatus)) {
+      targetJobStatus = null;
+    } else {
+      targetJobStatus = 'collected';
+    }
+  } else if (newStatus === 'warehouse') {
+    if (['sanitised', 'graded', 'completed', 'inventory'].includes(job.status as JobStatus)) {
+      targetJobStatus = null;
+    } else {
+      targetJobStatus = 'warehouse';
+    }
+  } else if (newStatus === 'sanitised') {
+    targetJobStatus = 'sanitised';
+  } else if (newStatus === 'graded') {
+    targetJobStatus = 'graded';
+  } else if (newStatus === 'completed') {
+    targetJobStatus = 'completed';
+  } else if (newStatus === 'cancelled') {
+    targetJobStatus = 'cancelled';
+  } else if (newStatus === 'device_allocated') {
+    targetJobStatus = 'device_allocated';
+  } else if (newStatus === 'courier_booked') {
+    targetJobStatus = 'courier_booked';
+  } else if (newStatus === 'dispatched') {
+    targetJobStatus = 'dispatched';
+  } else if (newStatus === 'delivered') {
+    targetJobStatus = 'delivered';
+  } else if (newStatus === 'inventory') {
+    targetJobStatus = 'inventory';
+  } else if (newStatus === 'collection_scheduled') {
+    // Leaver/mover: collection scheduled = courier booked for collection
+    targetJobStatus = 'courier_booked';
+  }
+
+  if (targetJobStatus && job.status !== targetJobStatus) {
+    await jobService.updateStatus(
+      job.id,
+      targetJobStatus as any,
+      changedBy,
+      `Updated from booking status: ${newStatus}`
+    );
+  }
+}
 
 export class JMLBookingService {
   /**
@@ -945,43 +1012,210 @@ export class JMLBookingService {
       co2ePerUnit
     );
 
-    // Update booking status
-    if (booking.status === 'pending') {
+    // Update booking status to next status based on booking type
+    // Get the next valid status for this booking type
+    const nextStatuses = getNextValidBookingStatusesForType(
+      booking.status,
+      booking.bookingType as BookingType,
+      booking.jmlSubType as JMLSubType | null
+    );
+    
+    // For new_starter and breakfix, device allocation should move to device_allocated
+    // Find device_allocated in the next statuses, or use the first valid next status
+    let nextStatus: BookingStatus | null = null;
+    
+    if (nextStatuses.includes('device_allocated')) {
+      nextStatus = 'device_allocated';
+    } else if (nextStatuses.length > 0 && !nextStatuses.includes('cancelled')) {
+      // Use the first non-cancelled next status
+      nextStatus = nextStatuses.find(s => s !== 'cancelled') || nextStatuses[0];
+    }
+
+    if (nextStatus) {
       await bookingRepo.update(booking.id, {
-        status: 'device_allocated',
+        status: nextStatus,
       });
 
       await bookingRepo.addStatusHistory(booking.id, {
-        status: 'device_allocated',
+        status: nextStatus,
         changedBy: allocatedBy,
         notes: `Device allocated: ${serialNumber}`,
       });
+
+      await syncJobStatusFromBooking(booking.id, nextStatus, allocatedBy);
     }
 
     return this.getBookingById(bookingId);
   }
 
   /**
-   * Update courier tracking number
+   * Allocate multiple devices based on criteria (category, make, model, deviceType, quantity)
    */
-  async updateCourierTracking(bookingId: string, trackingNumber: string, updatedBy: string) {
+  async allocateDevicesByCriteria(
+    bookingId: string,
+    category: string,
+    make: string,
+    model: string,
+    deviceType: string | null,
+    quantity: number,
+    allocatedBy: string
+  ) {
     const booking = await bookingRepo.findById(bookingId);
 
     if (!booking) {
       throw new NotFoundError('Booking', bookingId);
     }
 
-    await bookingRepo.update(booking.id, {
-      courierTracking: trackingNumber,
-      status: booking.status === 'device_allocated' ? 'courier_booked' : booking.status,
+    if (booking.bookingType !== 'jml') {
+      throw new ValidationError('Device allocation is only for JML bookings');
+    }
+
+    if (!booking.clientId) {
+      throw new ValidationError('Booking must have a client to allocate devices');
+    }
+
+    // Find available inventory matching criteria
+    const availableInventory = await inventoryService.getAvailableInventory(
+      null, // Unallocated inventory
+      booking.tenantId,
+      category,
+      undefined // conditionCode
+    );
+
+    // Filter by make, model, and deviceType
+    const matchingInventory = availableInventory.filter(item => {
+      const matchesMake = item.make.toLowerCase() === make.toLowerCase();
+      const matchesModel = item.model.toLowerCase() === model.toLowerCase();
+      const matchesDeviceType = deviceType 
+        ? (item.deviceType?.toLowerCase() === deviceType.toLowerCase())
+        : (item.deviceType === null || item.deviceType === undefined);
+      
+      return matchesMake && matchesModel && matchesDeviceType;
     });
 
-    if (booking.status === 'device_allocated') {
-      await bookingRepo.addStatusHistory(booking.id, {
-        status: 'courier_booked',
-        changedBy: updatedBy,
-        notes: `Courier tracking: ${trackingNumber}`,
+    if (matchingInventory.length < quantity) {
+      throw new ValidationError(
+        `Not enough available devices. Found ${matchingInventory.length} matching devices, but ${quantity} requested.`
+      );
+    }
+
+    // Allocate the requested quantity
+    const allocatedItems = matchingInventory.slice(0, quantity);
+    const allocatedSerialNumbers: string[] = [];
+
+    // Get device category CO2 value for tracking
+    const assetCategory = await prisma.assetCategory.findFirst({
+      where: {
+        name: {
+          in: ['Laptop', 'Smart Phones', 'Desktop', 'Tablet'],
+        },
+      },
+    });
+
+    const co2ePerUnit = assetCategory?.co2ePerUnit || 250;
+
+    for (const item of allocatedItems) {
+      // Allocate each device
+      await inventoryService.allocateSerial(bookingId, item.serialNumber);
+      allocatedSerialNumbers.push(item.serialNumber);
+
+      // Track serial reuse for CO2 calculation
+      await serialReuseService.trackSerialReuse(
+        item.serialNumber,
+        bookingId,
+        booking.bookingType as BookingType,
+        booking.jmlSubType as JMLSubType | null,
+        co2ePerUnit
+      );
+    }
+
+    // Update booking status to next status based on booking type
+    // Get the next valid status for this booking type
+    const nextStatuses = getNextValidBookingStatusesForType(
+      booking.status,
+      booking.bookingType as BookingType,
+      booking.jmlSubType as JMLSubType | null
+    );
+    
+    // For new_starter and breakfix, device allocation should move to device_allocated
+    // Find device_allocated in the next statuses, or use the first valid next status
+    let nextStatus: BookingStatus | null = null;
+    
+    if (nextStatuses.includes('device_allocated')) {
+      nextStatus = 'device_allocated';
+    } else if (nextStatuses.length > 0 && !nextStatuses.includes('cancelled')) {
+      // Use the first non-cancelled next status
+      nextStatus = nextStatuses.find(s => s !== 'cancelled') || nextStatuses[0];
+    }
+
+    if (nextStatus) {
+      await bookingRepo.update(booking.id, {
+        status: nextStatus,
       });
+
+      const serialNumbersList = allocatedSerialNumbers.join(', ');
+      await bookingRepo.addStatusHistory(booking.id, {
+        status: nextStatus,
+        changedBy: allocatedBy,
+        notes: `Allocated ${quantity} device(s): ${serialNumbersList}`,
+      });
+
+      await syncJobStatusFromBooking(booking.id, nextStatus, allocatedBy);
+    }
+
+    return {
+      booking: await this.getBookingById(bookingId),
+      allocatedSerialNumbers,
+      quantity: allocatedItems.length,
+    };
+  }
+
+  /**
+   * Update courier tracking number and service
+   */
+  async updateCourierTracking(bookingId: string, trackingNumber: string, courierService: string, updatedBy: string) {
+    const booking = await bookingRepo.findById(bookingId);
+
+    if (!booking) {
+      throw new NotFoundError('Booking', bookingId);
+    }
+
+    // For new_starter and breakfix, device must be allocated before courier booking
+    if ((booking.jmlSubType === 'new_starter' || booking.jmlSubType === 'breakfix') && 
+        booking.status !== 'device_allocated') {
+      throw new ValidationError(
+        `Cannot book courier. Device must be allocated first. Current status: ${booking.status}`
+      );
+    }
+
+    // Determine next status based on current status and JML subtype
+    // Leaver/mover: created → collection_scheduled when courier is booked (workflow allows only that)
+    // New starter/breakfix: device_allocated → courier_booked
+    let nextStatus = booking.status;
+    if (booking.status === 'device_allocated') {
+      nextStatus = 'courier_booked';
+    } else if (booking.status === 'created' && (booking.jmlSubType === 'leaver' || booking.jmlSubType === 'mover')) {
+      nextStatus = 'collection_scheduled';
+    }
+
+    const notes = courierService 
+      ? `Courier: ${courierService}, Tracking: ${trackingNumber}`
+      : `Courier tracking: ${trackingNumber}`;
+
+    await bookingRepo.update(booking.id, {
+      courierTracking: trackingNumber,
+      courierService: courierService || null,
+      status: nextStatus,
+    });
+
+    if (nextStatus !== booking.status) {
+      await bookingRepo.addStatusHistory(booking.id, {
+        status: nextStatus,
+        changedBy: updatedBy,
+        notes: notes,
+      });
+
+      await syncJobStatusFromBooking(booking.id, nextStatus, updatedBy);
     }
 
     return this.getBookingById(bookingId);
@@ -1007,6 +1241,8 @@ export class JMLBookingService {
       changedBy: deliveredBy,
       notes: 'Device delivered - ticket closed',
     });
+
+    await syncJobStatusFromBooking(booking.id, 'delivered', deliveredBy);
 
     return this.getBookingById(bookingId);
   }
@@ -1063,6 +1299,8 @@ export class JMLBookingService {
       changedBy: collectedBy,
       notes: `Items collected: ${items.map(i => `${i.make} ${i.model} (${i.serialNumber})`).join(', ')}`,
     });
+
+    await syncJobStatusFromBooking(booking.id, 'collected', collectedBy);
 
     return this.getBookingById(bookingId);
   }

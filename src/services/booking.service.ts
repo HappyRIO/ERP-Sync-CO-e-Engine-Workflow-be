@@ -692,6 +692,13 @@ export class BookingService {
   async assignDriver(bookingId: string, driverId: string, scheduledBy: string, vehicleId?: string) {
     const booking = await this.getBookingById(bookingId);
 
+    // JML bookings use couriers, not drivers
+    if (booking.bookingType === 'jml') {
+      throw new ValidationError(
+        'JML bookings use couriers, not drivers. Please use the courier booking feature instead.'
+      );
+    }
+
     // Only allow driver assignment when booking is in "created" status (Generated/Approved)
     // This ensures drivers can only be assigned to newly approved bookings, not to bookings that are already scheduled
     if (booking.status !== 'created') {
@@ -1041,9 +1048,6 @@ export class BookingService {
     // Update booking with appropriate timestamp
     const updateData: any = { status: newStatus };
     if (newStatus === 'scheduled' && !booking.scheduledAt) {
-      updateData.scheduledAt = new Date();
-    } else if (newStatus === 'delivery_scheduled') {
-      // For Breakfix re-delivery, update scheduledAt (re-use the same field)
       updateData.scheduledAt = new Date();
     } else if (newStatus === 'collected' && !booking.collectedAt) {
       updateData.collectedAt = new Date();

@@ -1,7 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { InventorySyncService } from '../services/inventory-sync.service';
 import { AuthenticatedRequest, ApiResponse } from '../types';
-import { ValidationError } from '../utils/errors';
 import prisma from '../config/database';
 
 const inventoryService = new InventorySyncService();
@@ -20,23 +19,11 @@ export class InventoryController {
         } as ApiResponse);
       }
 
-      const { clientId, deviceType, conditionCode, status } = req.query;
+      const { allocatedTo, category, conditionCode, status } = req.query;
 
-      // For clients, only show their own inventory
-      // For admins/resellers, can filter by clientId
-      const targetClientId = req.user.role === 'client' 
-        ? req.user.userId // Client users see their own inventory
-        : (clientId as string | undefined);
-
-      if (!targetClientId && req.user.role !== 'admin') {
-        return res.status(400).json({
-          success: false,
-          error: 'clientId is required',
-        } as ApiResponse);
-      }
-
-      // Get client ID from user if client role
-      let actualClientId: string;
+      // For clients, only show their allocated inventory
+      // For admins/resellers, can filter by allocatedTo (undefined = all, null = unallocated only, string = specific client)
+      let targetAllocatedTo: string | null | undefined = undefined;
       if (req.user.role === 'client') {
         // Find client record for this user
         const client = await prisma.client.findFirst({
@@ -51,25 +38,32 @@ export class InventoryController {
             error: 'Client record not found',
           } as ApiResponse);
         }
-        actualClientId = client.id;
+        targetAllocatedTo = client.id;
       } else {
-        actualClientId = targetClientId!;
+        // For admin/reseller, allocatedTo query param handling:
+        // - not provided (undefined) = show all inventory
+        // - "__unallocated__" or null = show only unallocated
+        // - clientId string = show only that client's inventory
+        if (allocatedTo === undefined || allocatedTo === '') {
+          targetAllocatedTo = undefined; // Show all
+        } else if (allocatedTo === '__unallocated__' || allocatedTo === null) {
+          targetAllocatedTo = null; // Show only unallocated
+        } else {
+          targetAllocatedTo = allocatedTo as string; // Show specific client
+        }
       }
 
-      const inventory = await inventoryService.getAvailableInventory(
-        actualClientId,
-        deviceType as string | undefined,
-        conditionCode as string | undefined
+      const inventory = await inventoryService.getAllInventory(
+        targetAllocatedTo,
+        req.user.tenantId,
+        category as string | undefined,
+        conditionCode as string | undefined,
+        status as string | undefined
       );
-
-      // Filter by status if provided
-      const filteredInventory = status
-        ? inventory.filter(item => item.status === status)
-        : inventory;
 
       return res.json({
         success: true,
-        data: filteredInventory,
+        data: inventory,
       } as ApiResponse);
     } catch (error) {
       return next(error);
@@ -100,16 +94,16 @@ export class InventoryController {
 
       // Validate items
       for (const item of items) {
-        if (!item.deviceType || !item.make || !item.model || !item.serialNumber || !item.conditionCode) {
+        if (!item.category || !item.make || !item.model || !item.serialNumber || !item.conditionCode) {
           return res.status(400).json({
             success: false,
-            error: 'Each item must have deviceType, make, model, serialNumber, and conditionCode',
+            error: 'Each item must have category, make, model, serialNumber, and conditionCode. deviceType and imei are optional.',
           } as ApiResponse);
         }
       }
 
-      // Get client ID
-      let clientId: string;
+      // Get allocatedTo (clientId) - this will be stored in allocatedTo field if status is allocated
+      let allocatedTo: string | null = null;
       if (req.user.role === 'client') {
         const client = await prisma.client.findFirst({
           where: {
@@ -123,19 +117,14 @@ export class InventoryController {
             error: 'Client record not found',
           } as ApiResponse);
         }
-        clientId = client.id;
+        allocatedTo = client.id;
       } else {
+        // For admin/reseller, allocatedTo is optional (from request body)
         const { clientId: providedClientId } = req.body;
-        if (!providedClientId) {
-          return res.status(400).json({
-            success: false,
-            error: 'clientId is required',
-          } as ApiResponse);
-        }
-        clientId = providedClientId;
+        allocatedTo = providedClientId || null;
       }
 
-      const result = await inventoryService.bulkCreateInventory(clientId, items);
+      const result = await inventoryService.bulkCreateInventory(allocatedTo, items, req.user.tenantId);
 
       return res.status(201).json({
         success: true,
@@ -162,7 +151,7 @@ export class InventoryController {
       const { clientId } = req.body;
 
       // Get client ID
-      let actualClientId: string;
+      let actualClientId: string | null = null;
       if (req.user.role === 'client') {
         const client = await prisma.client.findFirst({
           where: {
@@ -178,16 +167,11 @@ export class InventoryController {
         }
         actualClientId = client.id;
       } else {
-        if (!clientId) {
-          return res.status(400).json({
-            success: false,
-            error: 'clientId is required',
-          } as ApiResponse);
-        }
-        actualClientId = clientId;
+        // For admin/reseller, clientId is optional (null means sync all clients for tenant)
+        actualClientId = clientId || null;
       }
 
-      const result = await inventoryService.syncClientInventory(actualClientId);
+      const result = await inventoryService.syncClientInventory(actualClientId, req.user.tenantId);
 
       return res.json({
         success: true,
@@ -211,18 +195,26 @@ export class InventoryController {
         } as ApiResponse);
       }
 
-      const { clientId, deviceType, conditionCode } = req.query;
+      const { allocatedTo, category, conditionCode } = req.query;
 
-      if (!clientId) {
+      if (!allocatedTo) {
         return res.status(400).json({
           success: false,
-          error: 'clientId is required',
+          error: 'allocatedTo (clientId) is required',
+        } as ApiResponse);
+      }
+
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
         } as ApiResponse);
       }
 
       const inventory = await inventoryService.getAvailableInventory(
-        clientId as string,
-        deviceType as string | undefined,
+        allocatedTo as string,
+        req.user.tenantId,
+        category as string | undefined,
         conditionCode as string | undefined
       );
 

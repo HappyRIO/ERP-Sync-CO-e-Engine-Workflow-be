@@ -8,45 +8,46 @@ import { BookingStatus, JobStatus, BookingType, JMLSubType } from '../types';
  */
 export const bookingTransitions: Record<BookingStatus, BookingStatus[]> = {
   pending: ['created', 'cancelled', 'device_allocated'], // JML can go to device_allocated
-  created: ['scheduled', 'cancelled'],
-  scheduled: ['collected', 'cancelled', 'courier_booked'], // JML can go to courier_booked
-  collected: ['sanitised', 'warehouse', 'in_transit'], // ITAD: sanitised, Leaver: warehouse, New-starter/Mover: in_transit
-  warehouse: ['sanitised'], // ITAD and Leaver: warehouse → sanitised
+  created: ['scheduled', 'cancelled', 'device_allocated', 'collection_scheduled'], // JML can go directly to device_allocated or collection_scheduled
+  scheduled: ['collected', 'cancelled', 'courier_booked'], // ITAD: collected, JML can go to courier_booked
+  collected: ['sanitised', 'warehouse', 'dispatched'], // ITAD: sanitised, Leaver: warehouse, New-starter/Mover: dispatched
+  warehouse: ['sanitised', 'inventory'], // ITAD: sanitised, Mover: inventory
   sanitised: ['graded'],
-  graded: ['completed', 'delivery_scheduled', 'inventory'], // ITAD: completed, Leaver: inventory, Breakfix: delivery_scheduled (re-delivery)
-  inventory: ['completed'], // Added to inventory (handles both reuse and disposal)
+  graded: ['completed', 'inventory'], // ITAD: completed, Leaver: inventory
+  inventory: ['completed', 'device_allocated'], // Added to inventory (handles both reuse and disposal), Mover: device_allocated
   completed: [],
   cancelled: [],
   // JML-specific statuses
   device_allocated: ['courier_booked', 'cancelled'],
-  courier_booked: ['in_transit', 'delivered', 'cancelled'],
-  in_transit: ['delivered', 'cancelled'],
-  delivered: ['completed'], // JML new starter/mover/breakfix outbound - ticket closed
-  collection_scheduled: ['collected', 'cancelled'], // JML leaver - collection scheduled
-  // Breakfix re-delivery statuses
-  delivery_scheduled: ['in_transit', 'cancelled'], // Breakfix: delivery_scheduled → in_transit
+  courier_booked: ['dispatched', 'cancelled'],
+  dispatched: ['delivered', 'collected', 'cancelled'], // JML: delivered (for deliveries), collected (for collections)
+  delivered: ['completed', 'collected'], // JML new starter/mover/breakfix outbound - ticket closed, Breakfix: collected
+  collection_scheduled: ['collected', 'cancelled'], // JML leaver/mover - collection scheduled
 };
 
 /**
  * Job status transitions (matching frontend logic)
  */
 export const jobTransitions: Record<JobStatus, JobStatus[]> = {
-  booked: ['routed', 'en_route'],
+  booked: ['routed', 'en_route', 'device_allocated', 'courier_booked'], // ITAD: routed/en_route, JML: device_allocated/courier_booked
   routed: ['en_route'],
   en_route: ['arrived'],
   arrived: ['collected', 'completed'], // Can complete directly if no collection needed
-  collected: ['warehouse', 'completed', 'in_transit'], // ITAD/Leaver: warehouse, Direct completion, New-starter/Mover: in_transit (with assets)
-  in_transit: ['arrived'], // Vehicle with assets arriving at delivery location
-  warehouse: ['sanitised'],
+  collected: ['warehouse', 'completed', 'dispatched'], // ITAD/Leaver: warehouse, Direct completion, JML: dispatched
+  warehouse: ['sanitised', 'inventory'], // ITAD: sanitised, Mover: inventory
   sanitised: ['graded'],
-  graded: ['completed', 'delivery_routed', 'inventory'], // ITAD: completed, Leaver: inventory, Breakfix: delivery_routed (re-delivery)
-  inventory: ['completed'], // Added to inventory (handles both reuse and disposal)
+  graded: ['completed', 'inventory'], // ITAD: completed, Leaver: inventory
+  inventory: ['completed', 'device_allocated'], // Added to inventory (handles both reuse and disposal), Mover: device_allocated
   completed: [],
   cancelled: [],
-  // Breakfix re-delivery statuses
-  delivery_routed: ['delivery_en_route'], // Breakfix: delivery_routed → delivery_en_route
-  delivery_en_route: ['delivery_arrived'], // Breakfix: delivery_en_route → delivery_arrived
-  delivery_arrived: ['completed'], // Breakfix: delivery_arrived → completed
+  // JML-specific statuses
+  device_allocated: ['courier_booked', 'cancelled'],
+  courier_booked: ['dispatched', 'cancelled'],
+  dispatched: ['delivered', 'collected', 'cancelled'], // JML: delivered (for deliveries), collected (for collections)
+  delivered: ['completed', 'collected'], // JML new starter/mover/breakfix outbound - ticket closed, Breakfix: collected
+  // Mover delivery statuses
+  delivery_courier_booked: ['delivery_dispatched', 'cancelled'], // Mover: delivery_courier_booked → delivery_dispatched
+  delivery_dispatched: ['delivered', 'cancelled'], // Mover: delivery_dispatched → delivered
 };
 
 /**
@@ -108,35 +109,121 @@ const bookingWorkflows: Record<BookingType, Record<JMLSubType | 'default', Recor
       cancelled: [],
       device_allocated: [],
       courier_booked: [],
-      in_transit: [],
+      dispatched: [],
+      delivered: [],
+      collection_scheduled: [],
+      inventory: [],
+    },
+    // ITAD doesn't use JML subtypes, but TypeScript requires them
+    new_starter: {
+      pending: [],
+      created: [],
+      scheduled: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      collection_scheduled: [],
+      inventory: [],
+    },
+    leaver: {
+      pending: [],
+      created: [],
+      scheduled: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      collection_scheduled: [],
+      inventory: [],
+    },
+    mover: {
+      pending: [],
+      created: [],
+      scheduled: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      collection_scheduled: [],
+      inventory: [],
+    },
+    breakfix: {
+      pending: [],
+      created: [],
+      scheduled: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
       delivered: [],
       collection_scheduled: [],
       inventory: [],
     },
   },
   jml: {
+    default: {
+      // JML default workflow (not used, but required by type)
+      pending: [],
+      created: [],
+      scheduled: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      collection_scheduled: [],
+      inventory: [],
+    },
     new_starter: {
       pending: ['created', 'cancelled', 'device_allocated'],
-      created: ['scheduled', 'cancelled'],
-      scheduled: ['collected', 'cancelled', 'courier_booked'],
-      collected: ['in_transit'], // New-starter: collected → in_transit
+      created: ['device_allocated', 'cancelled'], // Skip scheduled, go directly to device_allocated
+      scheduled: [],
+      collected: [],
       warehouse: [],
       sanitised: [],
       graded: [],
       completed: [],
       cancelled: [],
       device_allocated: ['courier_booked', 'cancelled'],
-      courier_booked: ['in_transit', 'delivered', 'cancelled'],
-      in_transit: ['delivered', 'cancelled'],
+      courier_booked: ['dispatched', 'cancelled'],
+      dispatched: ['delivered', 'cancelled'],
       delivered: ['completed'],
       collection_scheduled: [],
       inventory: [],
-      delivery_scheduled: [],
     },
     leaver: {
       pending: ['created', 'cancelled'],
-      created: ['scheduled', 'cancelled'],
-      scheduled: ['collected', 'cancelled', 'collection_scheduled'],
+      created: ['collection_scheduled', 'cancelled'], // Skip scheduled, go directly to collection_scheduled
+      scheduled: [],
       collected: ['warehouse'], // Leaver: collected → warehouse
       warehouse: ['sanitised'],
       sanitised: ['graded'],
@@ -146,39 +233,33 @@ const bookingWorkflows: Record<BookingType, Record<JMLSubType | 'default', Recor
       cancelled: [],
       device_allocated: [],
       courier_booked: [],
-      in_transit: [],
+      dispatched: [],
       delivered: [],
       collection_scheduled: ['collected', 'cancelled'],
-      delivery_scheduled: [],
     },
     mover: {
       // Mover: Leaver first (collect old device), then New Starter (deliver new device)
       pending: ['created', 'cancelled'],
-      created: ['scheduled', 'cancelled'],
-      scheduled: ['collected', 'cancelled'], // Collect old device first
+      created: ['collection_scheduled', 'cancelled'], // Skip scheduled, go directly to collection_scheduled
+      scheduled: [],
       collected: ['warehouse'], // Mover: collected old device → warehouse
-      warehouse: ['sanitised'],
-      sanitised: ['graded'],
-      graded: ['inventory'], // Old device: graded → inventory
+      warehouse: ['inventory'], // Mover: warehouse → inventory (skip sanitised and graded)
+      sanitised: [],
+      graded: [],
       inventory: ['device_allocated'], // After old device processed, allocate new device
       device_allocated: ['courier_booked', 'cancelled'], // New device allocated
-      courier_booked: ['in_transit', 'delivered', 'cancelled'], // New device in transit
-      in_transit: ['delivered', 'cancelled'], // New device delivered
+      courier_booked: ['dispatched', 'cancelled'], // New device courier booked
+      dispatched: ['delivered', 'cancelled'], // New device dispatched
       delivered: ['completed'], // New device delivered, job complete
       completed: [],
       cancelled: [],
-      collection_scheduled: [],
-      delivery_scheduled: [],
+      collection_scheduled: ['collected', 'cancelled'],
     },
     breakfix: {
       // Breakfix: New Starter first (deliver replacement), then Leaver (collect broken device)
       pending: ['created', 'cancelled', 'device_allocated'], // Can allocate replacement device first
-      created: ['scheduled', 'cancelled'],
-      scheduled: ['courier_booked', 'cancelled'], // Schedule delivery of replacement device
-      device_allocated: ['courier_booked', 'cancelled'], // Replacement device allocated
-      courier_booked: ['in_transit', 'delivered', 'cancelled'], // Replacement device in transit
-      in_transit: ['delivered', 'cancelled'], // Replacement device delivered
-      delivered: ['collected'], // After replacement delivered, collect broken device
+      created: ['device_allocated', 'cancelled'], // Skip scheduled, go directly to device_allocated
+      scheduled: [],
       collected: ['warehouse'], // Breakfix: collected broken device → warehouse
       warehouse: ['sanitised'], // Breakfix: warehouse → sanitised
       sanitised: ['graded'],
@@ -186,8 +267,11 @@ const bookingWorkflows: Record<BookingType, Record<JMLSubType | 'default', Recor
       inventory: ['completed'], // Broken device added to inventory
       completed: [],
       cancelled: [],
+      device_allocated: ['courier_booked', 'cancelled'], // Replacement device allocated
+      courier_booked: ['dispatched', 'cancelled'], // Replacement device courier booked
+      dispatched: ['delivered', 'cancelled'], // Replacement device dispatched
+      delivered: ['collected'], // After replacement delivered, collect broken device
       collection_scheduled: [],
-      delivery_scheduled: [], // Not used in breakfix workflow
     },
   },
 };
@@ -203,92 +287,195 @@ const jobWorkflows: Record<BookingType, Record<JMLSubType | 'default', Record<Jo
       en_route: ['arrived'],
       arrived: ['collected'],
       collected: ['warehouse'], // ITAD: collected → warehouse
-      in_transit: [],
       warehouse: ['sanitised'],
       sanitised: ['graded'],
       graded: ['completed'],
       completed: [],
       cancelled: [],
       inventory: [],
-      delivery_routed: [],
-      delivery_en_route: [],
-      delivery_arrived: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
     },
-  },
-  jml: {
+    // ITAD doesn't use JML subtypes, but TypeScript requires them
     new_starter: {
-      booked: ['routed'],
-      routed: ['collected'], // Driver is at warehouse, can collect directly
-      collected: ['in_transit'], // New-starter: collected → in_transit
-      in_transit: ['arrived'], // Arriving at client
-      arrived: ['completed'], // At client: completed
+      booked: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
       warehouse: [],
       sanitised: [],
       graded: [],
       completed: [],
       cancelled: [],
-      en_route: [], // Not used in new_starter workflow
       inventory: [],
-      delivery_routed: [],
-      delivery_en_route: [],
-      delivery_arrived: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
     },
     leaver: {
-      booked: ['routed', 'en_route'],
-      routed: ['en_route'],
-      en_route: ['arrived'],
-      arrived: ['collected'],
+      booked: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      inventory: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
+    },
+    mover: {
+      booked: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      inventory: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
+    },
+    breakfix: {
+      booked: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      inventory: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
+    },
+  },
+  jml: {
+    default: {
+      // JML default workflow (not used, but required by type)
+      booked: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      completed: [],
+      cancelled: [],
+      inventory: [],
+      device_allocated: [],
+      courier_booked: [],
+      dispatched: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
+    },
+    new_starter: {
+      booked: ['device_allocated'],
+      device_allocated: ['courier_booked', 'cancelled'],
+      courier_booked: ['dispatched', 'cancelled'],
+      dispatched: ['delivered', 'cancelled'],
+      delivered: ['completed'],
+      completed: [],
+      cancelled: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      collected: [],
+      warehouse: [],
+      sanitised: [],
+      graded: [],
+      inventory: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
+    },
+    leaver: {
+      booked: ['courier_booked'],
+      courier_booked: ['dispatched', 'cancelled'],
+      dispatched: ['collected', 'cancelled'],
       collected: ['warehouse'], // Leaver: collected → warehouse
-      in_transit: [],
       warehouse: ['sanitised'],
       sanitised: ['graded'],
       graded: ['inventory'], // Leaver: graded → inventory (handles both reuse and disposal)
       inventory: ['completed'], // Added to inventory
       completed: [],
       cancelled: [],
-      delivery_routed: [],
-      delivery_en_route: [],
-      delivery_arrived: [],
+      routed: [],
+      en_route: [],
+      arrived: [],
+      device_allocated: [],
+      delivered: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
     },
     mover: {
       // Mover: Leaver first (collect old device), then New Starter (deliver new device)
-      booked: ['routed', 'en_route'],
-      routed: ['en_route'],
-      en_route: ['arrived'], // At old office
-      arrived: ['collected'], // At old office: collected old device
+      booked: ['courier_booked'],
+      courier_booked: ['dispatched', 'cancelled'],
+      dispatched: ['collected', 'cancelled'], // Courier picks up old device
       collected: ['warehouse'], // Mover: collected old device → warehouse
-      warehouse: ['sanitised'],
-      sanitised: ['graded'],
-      graded: ['inventory'], // Old device: graded → inventory
-      inventory: ['routed'], // After old device processed, route new device delivery
-      // Note: For new device delivery, we reuse the same job but transition through delivery states
-      // After inventory, admin routes new device delivery
-      in_transit: ['delivery_arrived'], // New device in transit to new office
-      delivery_arrived: ['completed'], // New device delivered, job complete
+      warehouse: ['inventory'], // Mover: warehouse → inventory (skip sanitised and graded)
+      inventory: ['device_allocated'], // After old device processed, allocate new device
+      device_allocated: ['delivery_courier_booked', 'cancelled'], // New device allocated, book courier for delivery
+      delivery_courier_booked: ['delivery_dispatched', 'cancelled'], // Delivery courier booked
+      delivery_dispatched: ['delivered', 'cancelled'], // Delivery courier picked up new device
+      delivered: ['completed'], // New device delivered, job complete
       completed: [],
       cancelled: [],
-      delivery_routed: ['delivery_en_route'], // New device delivery routed
-      delivery_en_route: ['delivery_arrived'], // New device delivery en route
+      routed: [],
+      en_route: [],
+      arrived: [],
+      sanitised: [],
+      graded: [],
     },
     breakfix: {
       // Breakfix: New Starter first (deliver replacement), then Leaver (collect broken device)
-      booked: ['routed'], // Route replacement device delivery first
-      routed: ['collected'], // Driver collects replacement device from warehouse
-      collected: ['in_transit'], // Replacement device in transit
-      in_transit: ['arrived'], // Arriving at client with replacement
-      arrived: ['completed'], // Replacement delivered (first phase complete)
-      // After replacement delivered, collect broken device
-      // Note: Job transitions back to collection phase
+      booked: ['device_allocated'],
+      device_allocated: ['courier_booked', 'cancelled'], // Replacement device allocated
+      courier_booked: ['dispatched', 'cancelled'], // Replacement device courier booked
+      dispatched: ['delivered', 'cancelled'], // Replacement device dispatched
+      delivered: ['collected'], // After replacement delivered, collect broken device
+      collected: ['warehouse'], // Breakfix: collected broken device → warehouse
       warehouse: ['sanitised'], // Broken device at warehouse
       sanitised: ['graded'],
       graded: ['inventory'], // Broken device: graded → inventory
       inventory: ['completed'], // Broken device added to inventory
       completed: [],
       cancelled: [],
-      en_route: [], // Not used in breakfix workflow
-      delivery_routed: [], // Not used in breakfix workflow
-      delivery_en_route: [], // Not used in breakfix workflow
-      delivery_arrived: [], // Not used in breakfix workflow
+      routed: [],
+      en_route: [],
+      arrived: [],
+      delivery_courier_booked: [],
+      delivery_dispatched: [],
     },
   },
 };
@@ -392,12 +579,17 @@ export function getBookingStatusSequence(
   const sequences: Record<BookingType, Record<JMLSubType | 'default', BookingStatus[]>> = {
     itad_collection: {
       default: ['pending', 'created', 'scheduled', 'collected', 'warehouse', 'sanitised', 'graded', 'completed'],
+      new_starter: [],
+      leaver: [],
+      mover: [],
+      breakfix: [],
     },
     jml: {
-      new_starter: ['pending', 'created', 'scheduled', 'collected', 'in_transit', 'delivered', 'completed'],
-      leaver: ['pending', 'created', 'scheduled', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
-      mover: ['pending', 'created', 'scheduled', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'device_allocated', 'courier_booked', 'in_transit', 'delivered', 'completed'],
-      breakfix: ['pending', 'created', 'scheduled', 'device_allocated', 'courier_booked', 'in_transit', 'delivered', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
+      default: [], // JML default (not used)
+      new_starter: ['pending', 'created', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
+      leaver: ['pending', 'created', 'collection_scheduled', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
+      mover: ['pending', 'created', 'collection_scheduled', 'collected', 'warehouse', 'inventory', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
+      breakfix: ['pending', 'created', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
     },
   };
 
@@ -422,12 +614,17 @@ export function getJobStatusSequence(
   const sequences: Record<BookingType, Record<JMLSubType | 'default', JobStatus[]>> = {
     itad_collection: {
       default: ['booked', 'routed', 'en_route', 'arrived', 'collected', 'warehouse', 'sanitised', 'graded', 'completed'],
+      new_starter: [],
+      leaver: [],
+      mover: [],
+      breakfix: [],
     },
     jml: {
-      new_starter: ['booked', 'routed', 'collected', 'in_transit', 'arrived', 'completed'],
-      leaver: ['booked', 'routed', 'en_route', 'arrived', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
-      mover: ['booked', 'routed', 'en_route', 'arrived', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'delivery_routed', 'delivery_en_route', 'delivery_arrived', 'completed'],
-      breakfix: ['booked', 'routed', 'collected', 'in_transit', 'arrived', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
+      default: [], // JML default (not used)
+      new_starter: ['booked', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
+      leaver: ['booked', 'courier_booked', 'dispatched', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
+      mover: ['booked', 'courier_booked', 'dispatched', 'collected', 'warehouse', 'inventory', 'device_allocated', 'delivery_courier_booked', 'delivery_dispatched', 'delivered', 'completed'],
+      breakfix: ['booked', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
     },
   };
 

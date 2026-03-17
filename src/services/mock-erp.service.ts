@@ -108,9 +108,9 @@ class MockERPService {
   }
 
   /**
-   * Sync inventory to ERP
+   * Sync inventory to ERP (for job completion)
    */
-  async syncInventory(_jobNumber: string, _assets: Array<{
+  async syncInventoryToERP(_jobNumber: string, _assets: Array<{
     categoryName: string;
     quantity: number;
     serialNumbers?: string[];

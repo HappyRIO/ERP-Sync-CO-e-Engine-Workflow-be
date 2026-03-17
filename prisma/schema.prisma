@@ -105,7 +105,6 @@ model Client {
   // Relations
   bookings         Booking[]
   sites            Site[]
-  inventory        ClientInventory[]
   serialReuseHistory SerialReuseHistory[]
 
   @@index([tenantId])
@@ -236,6 +235,7 @@ model Booking {
   startDate              DateTime?     // For new starter (min 5 days)
   deviceType             String?       // Windows/Apple for new starter
   courierTracking        String?       // Tracking number
+  courierService         String?       // Courier service name (FedEx, DPD, UPS, etc.)
   deliveryDate           DateTime?     // When delivered/collected
 
   // Relations
@@ -267,11 +267,9 @@ enum BookingStatus {
   // JML-specific statuses
   device_allocated
   courier_booked
-  in_transit
+  dispatched
   delivered
   collection_scheduled
-  // Breakfix re-delivery statuses
-  delivery_scheduled
   // Leaver post-grading statuses
   inventory
 }
@@ -366,16 +364,19 @@ enum JobStatus {
   en_route
   arrived
   collected
-  in_transit
   warehouse
   sanitised
   graded
   completed
   cancelled
-  // Breakfix re-delivery statuses
-  delivery_routed
-  delivery_en_route
-  delivery_arrived
+  // JML-specific statuses
+  device_allocated
+  courier_booked
+  dispatched
+  delivered
+  // Mover delivery statuses
+  delivery_courier_booked
+  delivery_dispatched
   // Leaver post-grading statuses
   inventory
 }
@@ -694,27 +695,26 @@ model TwoFactorCode {
 // Client Inventory (laptops and mobile phones)
 model ClientInventory {
   id              String           @id @default(uuid())
-  clientId        String
-  client          Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   tenantId        String
   tenant          Tenant           @relation(fields: [tenantId], references: [id])
-  deviceType      String           // laptop, mobile_phone
+  category        String           // laptop, desktop, mobile, tablet, server, storage, networking
+  deviceType      String?          // Windows, Apple (for laptop/desktop only)
   make            String
   model           String
   serialNumber    String
-  imei            String?          // For mobile phones
+  imei            String?          // For mobile phones and tablets
   conditionCode   String           // IBMA, IBMB, etc. (synced from ReuseOS)
   erpInventoryId  String?          // Reference to ReuseOS inventory ID
   status          InventoryStatus  @default(available)
-  allocatedTo     String?          // Booking ID if allocated
+  allocatedTo     String?          // Client ID if allocated to a client
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   lastSyncedAt    DateTime?        // Last sync with ReuseOS
   
-  @@unique([clientId, serialNumber])
-  @@index([clientId])
+  @@unique([tenantId, serialNumber])
   @@index([tenantId])
   @@index([status])
+  @@index([category])
   @@index([conditionCode])
   @@index([erpInventoryId])
   @@index([allocatedTo])

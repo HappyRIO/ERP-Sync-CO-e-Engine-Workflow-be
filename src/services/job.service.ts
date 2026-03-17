@@ -374,6 +374,9 @@ export class JobService {
       const excludedStatuses = ['warehouse', 'sanitised', 'graded', 'completed'];
       const where: any = {
         driverId: filters.userId,
+        booking: {
+          bookingType: 'itad_collection', // Drivers only see ITAD collection jobs, not JML jobs
+        },
       };
       
       // Check if requesting history jobs (warehouse+ statuses)
@@ -381,42 +384,9 @@ export class JobService {
       const isHistoryRequest = filters.status && excludedStatuses.includes(filters.status);
       
       if (isHistoryRequest) {
-        // For history page: include warehouse+ statuses AND jobs beyond driver's final status
-        // This includes:
-        // - warehouse, sanitised, graded, completed (for ITAD/Leaver/Breakfix)
-        // - delivery-arrived, delivery-routed, delivery-en-route, completed (for Breakfix/Mover)
-        // - delivery-arrived, completed (for Mover - doesn't go through warehouse/sanitised/graded)
-        // - arrived, completed (for new_starter jobs - their final driver status)
-        where.OR = [
-          // ITAD/Leaver/Breakfix: warehouse, sanitised, graded, completed
-          {
-            status: { in: excludedStatuses },
-            booking: {
-              jmlSubType: { not: 'mover' }, // Mover doesn't use warehouse/sanitised/graded
-            },
-          },
-          // Breakfix: delivery statuses
-          {
-            status: { in: ['delivery_arrived', 'delivery_routed', 'delivery_en_route'] },
-            booking: {
-              jmlSubType: { in: ['breakfix', 'mover'] },
-            },
-          },
-          // Mover: delivery-arrived and completed (no warehouse/sanitised/graded)
-          {
-            status: 'completed',
-            booking: {
-              jmlSubType: 'mover',
-            },
-          },
-          // New Starter: arrived status (final driver status)
-          {
-            status: 'arrived',
-            booking: {
-              jmlSubType: 'new_starter',
-            },
-          },
-        ];
+        // For history page: include warehouse+ statuses for ITAD collection jobs
+        // Drivers only see ITAD collection jobs, so we only need ITAD statuses
+        where.status = { in: excludedStatuses };
       } else if (filters.status && !excludedStatuses.includes(filters.status)) {
         // Specific active status filter
         where.status = filters.status;
@@ -1191,43 +1161,9 @@ export class JobService {
           if (bookingType === 'jml' && (jmlSubType === 'leaver' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
             targetBookingStatus = 'inventory' as BookingStatus;
           }
-        } else if (newStatus === 'in_transit') {
-          // For New-starter, Mover, and Breakfix: job in_transit → booking in_transit
-          if (bookingType === 'jml' && (jmlSubType === 'new_starter' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
-            targetBookingStatus = 'in_transit' as BookingStatus;
-          }
         } else if (newStatus === 'arrived') {
-          // For New-starter, Mover, Breakfix: if booking is in_transit, then arrived means delivered
-          // For Breakfix, this is the first phase (replacement delivery)
-          if (bookingType === 'jml' && booking.status === 'in_transit' && 
-              (jmlSubType === 'new_starter' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
-            targetBookingStatus = 'delivered' as BookingStatus;
-          }
-        } else if (newStatus === 'delivery_routed') {
-          // Mover: delivery_routed → device_allocated (new device delivery routed)
-          // Breakfix: delivery_routed → delivery_scheduled (replacement delivery scheduled)
-          if (bookingType === 'jml') {
-            if (jmlSubType === 'mover') {
-              targetBookingStatus = 'device_allocated' as BookingStatus;
-            } else if (jmlSubType === 'breakfix') {
-              targetBookingStatus = 'delivery_scheduled' as BookingStatus;
-            }
-          }
-        } else if (newStatus === 'delivery_en_route') {
-          // Mover: delivery_en_route → courier_booked (new device in transit)
-          // Breakfix: delivery_en_route → in_transit (replacement devices in transit)
-          if (bookingType === 'jml') {
-            if (jmlSubType === 'mover') {
-              targetBookingStatus = 'courier_booked' as BookingStatus;
-            } else if (jmlSubType === 'breakfix') {
-              targetBookingStatus = 'in_transit' as BookingStatus;
-            }
-          }
-        } else if (newStatus === 'delivery_arrived') {
-          // Breakfix and Mover: delivery_arrived → delivered
-          if (bookingType === 'jml' && (jmlSubType === 'breakfix' || jmlSubType === 'mover')) {
-            targetBookingStatus = 'delivered' as BookingStatus;
-          }
+          // For ITAD jobs: arrived → collected (legacy mapping)
+          // JML jobs use courier-based workflows and don't use 'arrived' status
         } else if (newStatus === 'completed') {
           targetBookingStatus = 'completed' as BookingStatus;
         } else if (newStatus === 'cancelled') {
@@ -1248,10 +1184,6 @@ export class JobService {
               updateData.sanitisedAt = new Date();
             } else if (targetBookingStatus === 'graded' && !booking.gradedAt) {
               updateData.gradedAt = new Date();
-            } else if (targetBookingStatus === 'delivery_scheduled' && !booking.scheduledAt) {
-              // For Breakfix re-delivery, we can re-use scheduledAt or add a new field
-              // For now, update scheduledAt if it's the re-delivery scheduling
-              updateData.scheduledAt = new Date();
             } else if (targetBookingStatus === 'delivered' && !booking.deliveryDate) {
               updateData.deliveryDate = new Date();
             } else if (targetBookingStatus === 'completed' && !booking.completedAt) {
