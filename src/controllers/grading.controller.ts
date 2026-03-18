@@ -102,7 +102,7 @@ export class GradingController {
         } as ApiResponse);
       }
 
-      const { bookingId, assetId, assetCategory, grade, condition, notes } = req.body;
+      const { bookingId, assetId, assetCategory, grade, condition, notes, quantity, serialNumbers } = req.body;
 
       if (!bookingId || !assetId || !assetCategory || !grade) {
         return res.status(400).json({
@@ -118,7 +118,9 @@ export class GradingController {
         grade,
         req.user.userId,
         condition,
-        notes
+        notes,
+        quantity,
+        serialNumbers
       );
 
       return res.json({

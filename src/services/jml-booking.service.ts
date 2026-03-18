@@ -101,14 +101,15 @@ export class JMLBookingService {
     postcode: string;
     phone: string;
     startDate: Date;
-    deviceType: 'Windows' | 'Apple';
+    deviceType: 'Windows' | 'Apple' | 'Android';
     siteName: string;
     devices?: Array<{
       category: string;
       make: string;
       model: string;
       quantity: number;
-      deviceType: 'Windows' | 'Apple';
+      deviceType: 'Windows' | 'Apple' | 'Android';
+      notes?: string;
     }>;
     lat?: number;
     lng?: number;
@@ -275,6 +276,7 @@ export class JMLBookingService {
         model: d.model,
         quantity: d.quantity,
         deviceType: d.deviceType,
+        notes: d.notes,
       })));
       await bookingRepo.addStatusHistory(booking.id, {
         status: 'pending',
@@ -334,7 +336,8 @@ export class JMLBookingService {
       make: string;
       model: string;
       quantity: number;
-      deviceType: 'Windows' | 'Apple';
+      deviceType: 'Windows' | 'Apple' | 'Android';
+      notes?: string;
     }>;
     lat?: number;
     lng?: number;
@@ -507,6 +510,7 @@ export class JMLBookingService {
         model: d.model,
         quantity: d.quantity,
         deviceType: d.deviceType,
+        notes: d.notes,
       })));
       await bookingRepo.addStatusHistory(booking.id, {
         status: 'pending',
@@ -543,9 +547,10 @@ export class JMLBookingService {
       make: string;
       model: string;
       quantity: number;
-      deviceType: 'Windows' | 'Apple';
+      deviceType: 'Windows' | 'Apple' | 'Android';
+      notes?: string;
     }>;
-    deviceType: 'Windows' | 'Apple';
+    deviceType: 'Windows' | 'Apple' | 'Android';
     lat?: number;
     lng?: number;
     createdBy: string;
@@ -690,6 +695,7 @@ export class JMLBookingService {
       model: d.model,
       quantity: d.quantity,
       deviceType: d.deviceType,
+      notes: d.notes,
     })));
     await bookingRepo.addStatusHistory(booking.id, {
       status: 'pending',
@@ -745,9 +751,10 @@ export class JMLBookingService {
       make: string;
       model: string;
       quantity: number;
-      deviceType: 'Windows' | 'Apple';
+      deviceType: 'Windows' | 'Apple' | 'Android';
+      notes?: string;
     }>;
-    deviceType: 'Windows' | 'Apple';
+    deviceType: 'Windows' | 'Apple' | 'Android';
     lat?: number; // New address latitude
     lng?: number; // New address longitude
     createdBy: string;
@@ -931,6 +938,7 @@ export class JMLBookingService {
       model: d.model,
       quantity: d.quantity,
       deviceType: d.deviceType,
+      notes: d.notes,
     })));
     
     // Store current address information in status history notes

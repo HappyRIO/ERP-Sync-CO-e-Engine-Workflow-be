@@ -847,13 +847,15 @@ export class JobService {
   }
 
   /**
-   * Update job status
+   * Update job status.
+   * @param options.skipSyncToBooking - When true, do not sync job status back to booking (used when doing intermediate steps e.g. leaver/breakfix courier_booked → dispatched → collected).
    */
   async updateStatus(
     jobId: string,
     newStatus: JobStatus,
     changedBy: string,
-    notes?: string
+    notes?: string,
+    options?: { skipSyncToBooking?: boolean }
   ) {
     const job = await this.getJobById(jobId);
 
@@ -1138,8 +1140,8 @@ export class JobService {
       }
     }
 
-    // Sync booking status when job status changes
-    if (job.bookingId) {
+    // Sync booking status when job status changes (skip when doing intermediate step e.g. leaver/breakfix courier_booked→dispatched→collected)
+    if (job.bookingId && !options?.skipSyncToBooking) {
       const booking = await bookingRepo.findById(job.bookingId);
       if (booking) {
         const bookingType = booking.bookingType || 'itad_collection';
@@ -1148,7 +1150,12 @@ export class JobService {
         // Map job status to booking status based on booking type
         let targetBookingStatus: BookingStatus | null = null;
 
-        if (newStatus === 'collected') {
+        if (newStatus === 'routed') {
+          // ITAD: driver assigned → booking scheduled
+          if (bookingType === 'itad_collection') {
+            targetBookingStatus = 'scheduled' as BookingStatus;
+          }
+        } else if (newStatus === 'collected') {
           targetBookingStatus = 'collected' as BookingStatus;
         } else if (newStatus === 'warehouse') {
           // For ITAD, Leaver, Mover, and Breakfix: warehouse → warehouse
@@ -1165,14 +1172,21 @@ export class JobService {
           if (bookingType === 'jml' && (jmlSubType === 'leaver' || jmlSubType === 'mover' || jmlSubType === 'breakfix')) {
             targetBookingStatus = 'inventory' as BookingStatus;
           }
-        } else if (newStatus === 'arrived') {
-          // For ITAD jobs: arrived → collected (legacy mapping)
-          // JML jobs use courier-based workflows and don't use 'arrived' status
         } else if (newStatus === 'completed') {
           targetBookingStatus = 'completed' as BookingStatus;
         } else if (newStatus === 'cancelled') {
           targetBookingStatus = 'cancelled' as BookingStatus;
+        } else if (newStatus === 'device_allocated') {
+          targetBookingStatus = 'device_allocated' as BookingStatus;
+        } else if (newStatus === 'courier_booked') {
+          targetBookingStatus = 'courier_booked' as BookingStatus;
+        } else if (newStatus === 'dispatched') {
+          targetBookingStatus = 'dispatched' as BookingStatus;
+        } else if (newStatus === 'delivered') {
+          targetBookingStatus = 'delivered' as BookingStatus;
         }
+        // delivery_courier_booked / delivery_dispatched: no booking status (mover delivery phase)
+        // arrived: not synced to booking (driver-only milestone; booking moves to collected when job reaches collected)
 
         // Update booking status if it's different and the transition is valid
         if (targetBookingStatus && booking.status !== targetBookingStatus) {

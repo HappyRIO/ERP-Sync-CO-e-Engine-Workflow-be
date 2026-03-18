@@ -5,7 +5,7 @@ import { JobRepository } from '../repositories/job.repository';
 import { CO2Service } from './co2.service';
 import { BuybackService } from './buyback.service';
 import { mockERPService } from './mock-erp.service';
-import { isValidBookingTransition, isValidJobTransition, isValidBookingTransitionForType } from '../middleware/workflow';
+import { isValidBookingTransition, isValidJobTransition, isValidBookingTransitionForType, isValidJobTransitionForType } from '../middleware/workflow';
 import { ValidationError, NotFoundError } from '../utils/errors';
 import { BookingStatus, JobStatus } from '../types';
 import { calculateTravelEmissions } from '../utils/co2';
@@ -1178,26 +1178,81 @@ export class BookingService {
         } else if (newStatus === 'collected') {
           // Booking collected - job should be "collected" or "warehouse"
           // If job is already at warehouse or beyond, keep it; otherwise set to collected
-          if (['warehouse', 'sanitised', 'graded', 'completed'].includes(job.status)) {
-            // Don't update - job is already ahead
+          // Leaver/breakfix: job goes courier_booked → dispatched → collected; do both steps when booking moves to collected
+          if (['warehouse', 'sanitised', 'graded', 'inventory', 'completed'].includes(job.status)) {
             targetJobStatus = null;
+          } else if (
+            bookingType === 'jml' &&
+            (jmlSubType === 'leaver' || jmlSubType === 'breakfix') &&
+            job.status === 'courier_booked'
+          ) {
+            // Two-step job update: courier_booked → dispatched → collected (skip syncing back to booking on first step)
+            targetJobStatus = null; // handle below without single update
           } else {
             targetJobStatus = 'collected';
+          }
+        } else if (newStatus === 'warehouse') {
+          // If job is already at sanitised or beyond, keep it; otherwise set to warehouse
+          if (['sanitised', 'graded', 'inventory', 'completed'].includes(job.status)) {
+            targetJobStatus = null;
+          } else {
+            targetJobStatus = 'warehouse';
           }
         } else if (newStatus === 'sanitised') {
           targetJobStatus = 'sanitised';
         } else if (newStatus === 'graded') {
           targetJobStatus = 'graded';
+        } else if (newStatus === 'inventory') {
+          // Leaver, Breakfix, Mover: booking inventory → job inventory
+          if (['completed'].includes(job.status)) {
+            targetJobStatus = null;
+          } else {
+            targetJobStatus = 'inventory';
+          }
         } else if (newStatus === 'completed') {
           targetJobStatus = 'completed';
         } else if (newStatus === 'cancelled') {
           targetJobStatus = 'cancelled';
+        } else if (newStatus === 'device_allocated') {
+          targetJobStatus = 'device_allocated';
+        } else if (newStatus === 'courier_booked') {
+          targetJobStatus = 'courier_booked';
+        } else if (newStatus === 'dispatched') {
+          targetJobStatus = 'dispatched';
+        } else if (newStatus === 'delivered') {
+          targetJobStatus = 'delivered';
         }
+        // collection_scheduled: no job status change (job stays booked/courier_booked until collection)
 
-        // Update job status if it's different and the transition is valid
-        // Use JobService.updateStatus to ensure notifications are sent
-        if (targetJobStatus && job.status !== targetJobStatus) {
-          if (isValidJobTransition(job.status, targetJobStatus)) {
+        // Leaver/breakfix: when booking moves courier_booked → collected, job must go courier_booked → dispatched → collected (two steps at once)
+        const isLeaverOrBreakfixCollected =
+          newStatus === 'collected' &&
+          bookingType === 'jml' &&
+          (jmlSubType === 'leaver' || jmlSubType === 'breakfix') &&
+          job.status === 'courier_booked';
+
+        if (isLeaverOrBreakfixCollected) {
+          const { JobService } = await import('./job.service');
+          const jobService = new JobService();
+          if (isValidJobTransitionForType('courier_booked', 'dispatched', bookingType, jmlSubType) &&
+              isValidJobTransitionForType('dispatched', 'collected', bookingType, jmlSubType)) {
+            await jobService.updateStatus(
+              job.id,
+              'dispatched',
+              changedBy,
+              `Updated from booking status: ${newStatus} (step 1/2)`,
+              { skipSyncToBooking: true }
+            );
+            await jobService.updateStatus(
+              job.id,
+              'collected',
+              changedBy,
+              `Updated from booking status: ${newStatus} (step 2/2)`
+            );
+          }
+        } else if (targetJobStatus && job.status !== targetJobStatus) {
+          // Single job status update
+          if (isValidJobTransitionForType(job.status, targetJobStatus, bookingType, jmlSubType)) {
             const { JobService } = await import('./job.service');
             const jobService = new JobService();
             await jobService.updateStatus(

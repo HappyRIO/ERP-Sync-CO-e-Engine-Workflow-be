@@ -73,15 +73,39 @@ CREATE TYPE "JobStatus_new" AS ENUM (
     'inventory'
 );
 
+-- Drop defaults before changing enum types (Postgres can't always cast defaults automatically)
+ALTER TABLE "Booking" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "Job" ALTER COLUMN "status" DROP DEFAULT;
+
 -- Update Booking table to use new enum
 ALTER TABLE "Booking" 
     ALTER COLUMN "status" TYPE "BookingStatus_new" 
     USING "status"::text::"BookingStatus_new";
 
+-- Update BookingStatusHistory table to use new enum (depends on BookingStatus)
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'BookingStatusHistory') THEN
+        ALTER TABLE "BookingStatusHistory" 
+            ALTER COLUMN "status" TYPE "BookingStatus_new" 
+            USING "status"::text::"BookingStatus_new";
+    END IF;
+END $$;
+
 -- Update Job table to use new enum
 ALTER TABLE "Job" 
     ALTER COLUMN "status" TYPE "JobStatus_new" 
     USING "status"::text::"JobStatus_new";
+
+-- Update Evidence table (depends on JobStatus)
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Evidence') THEN
+        ALTER TABLE "Evidence"
+            ALTER COLUMN "status" TYPE "JobStatus_new"
+            USING "status"::text::"JobStatus_new";
+    END IF;
+END $$;
 
 -- Update JobStatusHistory table if it exists
 DO $$ 
@@ -100,3 +124,7 @@ DROP TYPE "JobStatus";
 -- Rename new enums to original names
 ALTER TYPE "BookingStatus_new" RENAME TO "BookingStatus";
 ALTER TYPE "JobStatus_new" RENAME TO "JobStatus";
+
+-- Restore defaults after enum swap
+ALTER TABLE "Booking" ALTER COLUMN "status" SET DEFAULT 'pending';
+ALTER TABLE "Job" ALTER COLUMN "status" SET DEFAULT 'booked';

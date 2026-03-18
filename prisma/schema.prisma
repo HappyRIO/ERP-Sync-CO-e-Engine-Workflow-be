@@ -183,6 +183,7 @@ model AssetCategory {
   // Relations
   bookingAssets BookingAsset[]
   jobAssets     JobAsset[]
+  gradingRecords GradingRecord[]
 }
 
 // Bookings (Initial booking request)
@@ -243,6 +244,7 @@ model Booking {
   statusHistory          BookingStatusHistory[]
   documents              Document[]             @relation("BookingDocuments")
   serialReuseHistory     SerialReuseHistory[]
+  gradingRecords         GradingRecord[]
 
   @@index([clientId])
   @@index([tenantId])
@@ -272,6 +274,14 @@ enum BookingStatus {
   collection_scheduled
   // Leaver post-grading statuses
   inventory
+}
+
+enum GradingGrade {
+  A
+  B
+  C
+  D
+  Q
 }
 
 // Booking Assets
@@ -346,6 +356,7 @@ model Job {
   financeStatus       FinanceStatus?
   documents           Document[]
   serialReuseHistory  SerialReuseHistory[]
+  gradingRecords      GradingRecord[]
 
   @@index([bookingId])
   @@index([tenantId])
@@ -391,7 +402,7 @@ model JobAsset {
   categoryName         String
   quantity             Int
   serialNumbers         String[]      @default([])
-  grade                 String? // A, B, C, D, Recycled
+  grade                 String? // Legacy single-grade (kept for backward compatibility)
   weight                Float?
   sanitised             Boolean       @default(false)
   wipeMethod            String?
@@ -404,9 +415,38 @@ model JobAsset {
   accessories           String[]      @default([]) // PSU, charger, etc.
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
+  gradingRecords        GradingRecord[]
 
   @@index([jobId])
   @@index([categoryId])
+}
+
+model GradingRecord {
+  id               String      @id @default(uuid())
+  bookingId        String
+  booking          Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  jobId            String?
+  job              Job?        @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  jobAssetId       String?
+  jobAsset         JobAsset?   @relation(fields: [jobAssetId], references: [id], onDelete: SetNull)
+  categoryId       String
+  category         AssetCategory @relation(fields: [categoryId], references: [id])
+  categoryName     String
+  grade            GradingGrade
+  quantity         Int
+  conditionCode    String?
+  serialNumbers    String[]    @default([])
+  resaleValue      Float       // per-unit resale value
+  gradedBy         String
+  notes            String?
+  createdAt        DateTime    @default(now())
+
+  @@index([bookingId])
+  @@index([jobId])
+  @@index([jobAssetId])
+  @@index([categoryId])
+  @@index([grade])
+  @@index([createdAt])
 }
 
 // Job Status History

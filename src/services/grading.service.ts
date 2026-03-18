@@ -9,22 +9,24 @@ const bookingRepo = new BookingRepository();
 export interface GradingRecordData {
   id: string;
   bookingId: string;
-  assetId: string;
+  assetId: string; // categoryId (frontend legacy naming)
   assetCategory: string;
-  grade: 'A' | 'B' | 'C' | 'D' | 'Recycled';
+  grade: 'A' | 'B' | 'C' | 'D' | 'Q';
+  quantity: number;
   resaleValue: number;
   gradedAt: string;
   gradedBy: string;
   notes?: string;
-  condition?: string;
+  condition?: string; // conditionCode (frontend legacy naming)
+  serialNumbers?: string[];
 }
 
 const gradeConditionFactors: Record<string, number> = {
   'A': 1.10,     // +10% above Grade B baseline
   'B': 1.0,      // Baseline (100% - buybackFloor)
   'C': 0.75,     // -25% below Grade B baseline
-  'D': 0,        // Zero value
-  'Recycled': 0, // No resale value
+  'D': 0,        // Zero value (disposal)
+  'Q': 0,        // Quarantine / disposal
 };
 
 export class GradingService {
@@ -37,87 +39,25 @@ export class GradingService {
       throw new NotFoundError('Booking', bookingId);
     }
 
-    // Get all job assets for this booking
-    const job = await prisma.job.findUnique({
+    const records = await prisma.gradingRecord.findMany({
       where: { bookingId },
-      include: {
-        assets: {
-          include: {
-            category: true,
-          },
-        },
-      },
+      orderBy: { createdAt: 'asc' },
     });
 
-    if (!job) {
-      return [];
-    }
-
-    // Filter assets that have been graded
-    const gradedAssets = job.assets.filter(asset => asset.grade !== null);
-
-    if (gradedAssets.length === 0) {
-      return [];
-    }
-
-    // Transform job assets to grading records and recalculate resale value (matching new booking formula)
-    const records = await Promise.all(gradedAssets.map(async (asset) => {
-      const category = asset.category;
-      if (!category) {
-        return {
-          id: asset.gradingRecordId || asset.id,
-          bookingId,
-          assetId: asset.categoryId,
-          assetCategory: asset.categoryName,
-          grade: asset.grade as 'A' | 'B' | 'C' | 'D' | 'Recycled',
-          resaleValue: asset.resaleValue || 0, // Fallback to stored value
-          gradedAt: asset.updatedAt.toISOString(),
-          gradedBy: '', // We don't track this in JobAsset currently
-          notes: undefined,
-          condition: undefined,
-        };
-      }
-
-      // Use buybackFloor directly (same as new booking calculation)
-      const buybackFloor = category.buybackFloor ?? 0;
-      
-      if (buybackFloor === 0) {
-        // Fallback to stored value if buybackFloor not set
-        return {
-          id: asset.gradingRecordId || asset.id,
-          bookingId,
-          assetId: asset.categoryId,
-          assetCategory: asset.categoryName,
-          grade: asset.grade as 'A' | 'B' | 'C' | 'D' | 'Recycled',
-          resaleValue: asset.resaleValue || 0,
-          gradedAt: asset.updatedAt.toISOString(),
-          gradedBy: '',
-          notes: undefined,
-          condition: undefined,
-        };
-      }
-
-      // Get grade-based condition factor
-      const conditionFactor = gradeConditionFactors[asset.grade as keyof typeof gradeConditionFactors] || 0;
-      
-      // Simple calculation matching new booking: buybackFloor × conditionFactor
-      const resaleValuePerUnit = buybackFloor * conditionFactor;
-
-      return {
-        id: asset.gradingRecordId || asset.id,
-        bookingId,
-        assetId: asset.categoryId,
-        assetCategory: asset.categoryName,
-        grade: asset.grade as 'A' | 'B' | 'C' | 'D' | 'Recycled',
-        resaleValue: resaleValuePerUnit, // Recalculated per-unit value
-        gradedAt: asset.updatedAt.toISOString(),
-        gradedBy: '',
-        notes: undefined,
-        condition: undefined,
-      };
-    }));
-
-    return records;
+    return records.map((r) => ({
+      id: r.id,
+      bookingId: r.bookingId,
+      assetId: r.categoryId,
+      assetCategory: r.categoryName,
+      grade: r.grade as any,
+      quantity: r.quantity,
+      resaleValue: r.resaleValue,
+      gradedAt: r.createdAt.toISOString(),
+      gradedBy: r.gradedBy,
+      notes: r.notes ?? undefined,
+      condition: r.conditionCode ?? undefined,
+      serialNumbers: r.serialNumbers ?? [],
+    } satisfies GradingRecordData));
   }
 
   /**
@@ -127,10 +67,12 @@ export class GradingService {
     bookingId: string,
     assetId: string,
     assetCategory: string,
-    grade: 'A' | 'B' | 'C' | 'D' | 'Recycled',
+    grade: 'A' | 'B' | 'C' | 'D' | 'Q',
     gradedBy: string,
     condition?: string,
-    notes?: string
+    notes?: string,
+    quantity?: number,
+    serialNumbers?: string[]
   ) {
     const booking = await bookingRepo.findById(bookingId);
     if (!booking) {
@@ -152,17 +94,27 @@ export class GradingService {
       throw new ValidationError('Job not found for this booking');
     }
 
-    // Find the asset in the job
+    // Find the asset in the job (category group)
     const jobAsset = job.assets.find(asset => asset.categoryId === assetId);
     if (!jobAsset) {
       throw new NotFoundError('Asset', assetId);
     }
 
-    if (jobAsset.grade) {
-      throw new ValidationError('Asset has already been graded');
+    const qty = quantity ?? 1;
+    if (!Number.isInteger(qty) || qty <= 0) {
+      throw new ValidationError('quantity must be a positive integer');
     }
-
-    const { logger } = await import('../utils/logger');
+    if (qty > jobAsset.quantity) {
+      throw new ValidationError(`quantity cannot exceed booked quantity (${jobAsset.quantity})`);
+    }
+    const normalizedSerials = (serialNumbers ?? [])
+      .map(s => String(s).trim())
+      .filter(Boolean);
+    if (['A', 'B', 'C'].includes(grade)) {
+      if (normalizedSerials.length !== qty) {
+        throw new ValidationError(`serialNumbers must contain exactly ${qty} values for grade ${grade}`);
+      }
+    }
     
     // Get category from database
     const category = jobAsset.category || await prisma.assetCategory.findUnique({
@@ -188,7 +140,7 @@ export class GradingService {
     
     // Simple calculation matching new booking: buybackFloor × conditionFactor
     const resaleValuePerUnit = buybackFloor * conditionFactor;
-    const totalResaleValue = Math.round(resaleValuePerUnit * jobAsset.quantity * 100) / 100;
+    const totalResaleValue = Math.round(resaleValuePerUnit * qty * 100) / 100;
     
     // Log resale value calculation (debug level)
     logger.debug('Resale value calculation (matching new booking formula)', {
@@ -199,35 +151,41 @@ export class GradingService {
       grade,
       conditionFactor,
       resaleValuePerUnit,
-      quantity: jobAsset.quantity,
+      quantity: qty,
       totalResaleValue,
     });
 
-    // Generate grading record ID
-    const gradingRecordId = `GRADE-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-
-    // Update the job asset to mark it as graded
-    await prisma.jobAsset.update({
-      where: { id: jobAsset.id },
+    const record = await prisma.gradingRecord.create({
       data: {
-        grade: grade,
+        bookingId,
+        jobId: job.id,
+        jobAssetId: jobAsset.id,
+        categoryId: jobAsset.categoryId,
+        categoryName: jobAsset.categoryName,
+        grade: grade as any,
+        quantity: qty,
+        conditionCode: condition ? String(condition).trim() : null,
+        serialNumbers: normalizedSerials,
         resaleValue: resaleValuePerUnit,
-        gradingRecordId: gradingRecordId,
+        gradedBy,
+        notes: notes ? String(notes).trim() : null,
       },
     });
 
     return {
-      id: gradingRecordId,
+      id: record.id,
       bookingId,
       assetId,
       assetCategory,
       grade,
+      quantity: record.quantity,
       resaleValue: resaleValuePerUnit,
-      gradedAt: new Date().toISOString(),
+      gradedAt: record.createdAt.toISOString(),
       gradedBy,
       notes,
       condition,
-    };
+      serialNumbers: normalizedSerials,
+    } satisfies GradingRecordData;
   }
 
   /**
@@ -239,9 +197,9 @@ export class GradingService {
    * - Grade B: baseline (1.0 × buybackFloor)
    * - Grade C: -25% (0.75 × buybackFloor)
    * - Grade D: zero (0 × buybackFloor)
-   * - Recycled: zero (0 × buybackFloor)
+   * - Grade Q: zero (0 × buybackFloor)
    */
-  async calculateResaleValue(category: string, grade: 'A' | 'B' | 'C' | 'D' | 'Recycled', quantity: number): Promise<number> {
+  async calculateResaleValue(category: string, grade: 'A' | 'B' | 'C' | 'D' | 'Q', quantity: number): Promise<number> {
     // Find category in database (case-insensitive)
     const categoryRecord = await prisma.assetCategory.findFirst({
       where: {
