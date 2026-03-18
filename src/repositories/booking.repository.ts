@@ -7,6 +7,7 @@ export class BookingRepository {
       where: { id },
       include: {
         client: true,
+        creator: { select: { name: true } },
         site: true,
         assets: {
           include: { category: true },
@@ -135,6 +136,7 @@ export class BookingRepository {
     startDate?: Date;
     deviceType?: string;
     courierTracking?: string;
+    courierService?: string;
     deliveryDate?: Date;
   }) {
     // Build update data, ensuring status is properly typed as Prisma enum

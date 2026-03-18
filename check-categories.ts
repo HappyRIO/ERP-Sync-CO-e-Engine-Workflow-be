@@ -75,6 +75,24 @@ const expectedValues: Record<string, {
     buybackFloor: 15,
     buybackCap: 400,
   },
+  'VOIP': {
+    co2ePerUnit: 60,
+    avgWeight: 0.5,
+    avgBuybackValue: 30,
+    avgRRP: 150,
+    residualLow: 0.2,
+    buybackFloor: 5,
+    buybackCap: 80,
+  },
+  'WEEE Waste': {
+    co2ePerUnit: 100,
+    avgWeight: 2.0,
+    avgBuybackValue: 10,
+    avgRRP: 50,
+    residualLow: 0.2,
+    buybackFloor: 0,
+    buybackCap: 25,
+  },
 };
 
 async function checkCategories() {

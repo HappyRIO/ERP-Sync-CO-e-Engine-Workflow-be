@@ -29,6 +29,8 @@ export class InventorySyncService {
         server: 'server',
         storage: 'storage',
         networking: 'networking',
+        voip: 'VOIP',
+        weee_waste: 'WEEE Waste',
       };
       
       const category = categoryMap[baseCategory] || baseCategory;
@@ -51,6 +53,8 @@ export class InventorySyncService {
       server: 'server',
       storage: 'storage',
       networking: 'networking',
+      voip: 'VOIP',
+      weee_waste: 'WEEE Waste',
     };
     
     const category = categoryMap[deviceType] || deviceType;

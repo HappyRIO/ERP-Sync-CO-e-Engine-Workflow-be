@@ -11,6 +11,8 @@ const expectedValues: Record<string, { co2ePerUnit: number; avgBuybackValue: num
   'Desktop': { co2ePerUnit: 350, avgBuybackValue: 81 },
   'Storage': { co2ePerUnit: 800, avgBuybackValue: 300 },
   'Tablets': { co2ePerUnit: 90, avgBuybackValue: 102 },
+  'VOIP': { co2ePerUnit: 60, avgBuybackValue: 30 },
+  'WEEE Waste': { co2ePerUnit: 100, avgBuybackValue: 10 },
 };
 
 async function checkBuybackValues() {

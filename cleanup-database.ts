@@ -257,6 +257,28 @@ async function cleanupDatabase() {
         buybackFloor: 15,
         buybackCap: 400,
       },
+      {
+        name: 'VOIP',
+        icon: '📞',
+        co2ePerUnit: 60,
+        avgWeight: 0.5,
+        avgBuybackValue: 30,
+        avgRRP: 150,
+        residualLow: 0.2,
+        buybackFloor: 5,
+        buybackCap: 80,
+      },
+      {
+        name: 'WEEE Waste',
+        icon: '♻️',
+        co2ePerUnit: 100,
+        avgWeight: 2.0,
+        avgBuybackValue: 10,
+        avgRRP: 50,
+        residualLow: 0.2,
+        buybackFloor: 0,
+        buybackCap: 25,
+      },
     ];
 
     let createdCategories = 0;

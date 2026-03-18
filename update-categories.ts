@@ -75,6 +75,24 @@ const categoryData: Record<string, {
     buybackFloor: 15,
     buybackCap: 400,
   },
+  'VOIP': {
+    co2ePerUnit: 60, // Estimated
+    avgWeight: 0.5,
+    avgBuybackValue: 30, // Estimated
+    avgRRP: 150,
+    residualLow: 0.2,
+    buybackFloor: 5,
+    buybackCap: 80,
+  },
+  'WEEE Waste': {
+    co2ePerUnit: 100, // Estimated (recycling/avoided production)
+    avgWeight: 2.0,
+    avgBuybackValue: 10, // Estimated (often low for e-waste)
+    avgRRP: 50,
+    residualLow: 0.2,
+    buybackFloor: 0,
+    buybackCap: 25,
+  },
 };
 
 async function updateCategories() {

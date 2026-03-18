@@ -8,8 +8,8 @@ export interface TransformedJob {
   id: string;
   erpJobNumber: string;
   bookingId?: string | null;
-  clientName: string;
-  organisationName?: string; // Organisation/company name
+  organisationName: string; // Organisation/company name (from booking.client)
+  createdByName?: string; // Booker name (from booking.creator)
   siteName: string;
   siteAddress: string;
   status: string; // Converted to frontend format (en-route instead of en_route)
@@ -111,8 +111,8 @@ export function transformJobForAPI(job: any): TransformedJob {
     id: job.id,
     erpJobNumber: job.erpJobNumber,
     bookingId: job.bookingId,
-    clientName: job.clientName,
-    organisationName: job.booking?.client?.organisationName || job.booking?.clientName || undefined,
+    organisationName: job.booking?.client?.organisationName || job.booking?.client?.name || job.clientName || '',
+    createdByName: job.booking?.creator?.name ?? undefined,
     siteName: job.siteName,
     siteAddress: job.siteAddress,
     status: transformStatus(job.status),

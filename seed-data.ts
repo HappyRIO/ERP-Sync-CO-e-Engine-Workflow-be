@@ -4,15 +4,8 @@ import prisma from './src/config/database';
 async function seed() {
   console.log('🌱 Seeding database...');
 
-  // Check if categories already exist (global categories - no tenant needed)
-  const existingCategories = await prisma.assetCategory.findFirst();
-  if (existingCategories) {
-    console.log('⚠️  Asset categories already exist. Skipping seed.');
-    await prisma.$disconnect();
-    return;
-  }
-
-  // Create global asset categories (shared by all tenants)
+  // Create or update global asset categories (shared by all tenants)
+  // Uses upsert so new categories (e.g. VOIP, WEEE Waste) can be added to existing DBs
   const categories = [
     {
       name: 'Networking',
@@ -63,15 +56,36 @@ async function seed() {
       avgWeight: 0.5,
       avgBuybackValue: 50,
     },
+    {
+      name: 'VOIP',
+      icon: '📞',
+      co2ePerUnit: 60, // Estimated: kg CO2e saved per unit reused (IP phones)
+      avgWeight: 0.5,
+      avgBuybackValue: 30, // Estimated £
+    },
+    {
+      name: 'WEEE Waste',
+      icon: '♻️',
+      co2ePerUnit: 100, // Estimated: kg CO2e saved per unit (recycling/avoided production)
+      avgWeight: 2.0,
+      avgBuybackValue: 10, // Estimated £ (often low for e-waste)
+    },
   ];
 
+  let created = 0;
   for (const category of categories) {
-    await prisma.assetCategory.create({
-      data: category, // No tenantId - categories are global
+    const existing = await prisma.assetCategory.findUnique({
+      where: { name: category.name },
     });
+    if (!existing) {
+      await prisma.assetCategory.create({
+        data: category,
+      });
+      created++;
+    }
   }
 
-  console.log(`✅ Created ${categories.length} asset categories`);
+  console.log(`✅ Asset categories: ${created} new category/categories created (${categories.length} total defined)`);
 
   await prisma.$disconnect();
   console.log('✅ Seeding complete!');

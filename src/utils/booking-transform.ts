@@ -28,6 +28,7 @@ export interface TransformedBooking {
   driverId?: string;
   driverName?: string;
   createdBy?: string;
+  createdByName?: string;
   scheduledBy?: string;
   scheduledAt?: string;
   collectedAt?: string;
@@ -153,6 +154,7 @@ export function transformBookingForAPI(booking: any): TransformedBooking {
     driverId: booking.driverId,
     driverName: booking.driverName,
     createdBy: booking.createdBy,
+    createdByName: booking.creator?.name ?? undefined,
     scheduledBy: booking.scheduledBy,
     scheduledAt: booking.scheduledAt instanceof Date
       ? booking.scheduledAt.toISOString()

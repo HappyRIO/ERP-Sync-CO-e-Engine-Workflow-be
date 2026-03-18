@@ -989,19 +989,22 @@ export class JMLBookingService {
     }
 
     // Allocate serial from inventory
-    const inventoryItem = await inventoryService.allocateSerial(bookingId, serialNumber);
+    await inventoryService.allocateSerial(bookingId, serialNumber);
 
-    // Get device category CO2 value for tracking
-    // Find category by device type (laptop or mobile_phone)
-    const category = await prisma.assetCategory.findFirst({
-      where: {
-        name: {
-          in: ['Laptop', 'Smart Phones'],
-        },
-      },
+    // Get device category CO2 value for tracking - look up by allocated item's category
+    const inventoryItem = await prisma.clientInventory.findFirst({
+      where: { tenantId: booking.tenantId, serialNumber },
     });
+    const categoryName = inventoryItem?.category;
+    const category = categoryName
+      ? await prisma.assetCategory.findFirst({ where: { name: categoryName } })
+      : await prisma.assetCategory.findFirst({
+          where: {
+            name: { in: ['Laptop', 'Smart Phones', 'Desktop', 'Tablets', 'VOIP', 'WEEE Waste'] },
+          },
+        });
 
-    const co2ePerUnit = category?.co2ePerUnit || 250; // Default to laptop CO2 if not found
+    const co2ePerUnit = category?.co2ePerUnit ?? 250; // Default to laptop CO2 if not found
 
     // Track serial reuse for CO2 calculation
     await serialReuseService.trackSerialReuse(
@@ -1103,16 +1106,11 @@ export class JMLBookingService {
     const allocatedItems = matchingInventory.slice(0, quantity);
     const allocatedSerialNumbers: string[] = [];
 
-    // Get device category CO2 value for tracking
+    // Get device category CO2 value for tracking - look up by the category being allocated
     const assetCategory = await prisma.assetCategory.findFirst({
-      where: {
-        name: {
-          in: ['Laptop', 'Smart Phones', 'Desktop', 'Tablet'],
-        },
-      },
+      where: { name: category },
     });
-
-    const co2ePerUnit = assetCategory?.co2ePerUnit || 250;
+    const co2ePerUnit = assetCategory?.co2ePerUnit ?? 250;
 
     for (const item of allocatedItems) {
       // Allocate each device
@@ -1204,7 +1202,7 @@ export class JMLBookingService {
 
     await bookingRepo.update(booking.id, {
       courierTracking: trackingNumber,
-      courierService: courierService || null,
+      courierService: courierService,
       status: nextStatus,
     });
 

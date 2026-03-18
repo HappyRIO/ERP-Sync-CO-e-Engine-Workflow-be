@@ -13,6 +13,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:cleanup": "tsx cleanup-database.ts",
+    "db:seed": "tsx seed-data.ts",
     "db:check-categories": "tsx check-categories.ts",
     "db:update-categories": "tsx update-categories.ts",
     "create-super-admin": "tsx create-super-admin.ts"

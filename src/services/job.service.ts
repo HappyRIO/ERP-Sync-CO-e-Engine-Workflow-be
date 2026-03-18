@@ -281,6 +281,7 @@ export class JobService {
                 bookingNumber: true,
                 bookingType: true,
                 jmlSubType: true,
+                creator: { select: { name: true } },
                 client: {
                   select: {
                     id: true,
@@ -424,6 +425,7 @@ export class JobService {
                 bookingNumber: true,
                 bookingType: true,
                 jmlSubType: true,
+                creator: { select: { name: true } },
                 client: {
                   select: {
                     id: true,
@@ -604,6 +606,7 @@ export class JobService {
                 bookingNumber: true,
                 bookingType: true,
                 jmlSubType: true,
+                creator: { select: { name: true } },
                 client: {
                   select: {
                     id: true,
@@ -748,6 +751,7 @@ export class JobService {
                 bookingNumber: true,
                 bookingType: true,
                 jmlSubType: true,
+                creator: { select: { name: true } },
                 client: {
                   select: {
                     id: true,
