@@ -110,7 +110,7 @@ export class CO2Service {
    * Example: 350kg CO2 / 10 users = 35kg per user
    */
   async calculateSerialCO2e(
-    serialNumber: string,
+    _serialNumber: string,
     totalCO2e: number,
     reuseCount: number
   ): Promise<number> {

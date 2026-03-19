@@ -5,12 +5,13 @@ import { JobRepository } from '../repositories/job.repository';
 import { CO2Service } from './co2.service';
 import { BuybackService } from './buyback.service';
 import { mockERPService } from './mock-erp.service';
-import { isValidBookingTransition, isValidJobTransition, isValidBookingTransitionForType, isValidJobTransitionForType } from '../middleware/workflow';
+import { isValidJobTransition, isValidBookingTransitionForType, isValidJobTransitionForType } from '../middleware/workflow';
 import { ValidationError, NotFoundError } from '../utils/errors';
 import { BookingStatus, JobStatus } from '../types';
 import { calculateTravelEmissions } from '../utils/co2';
 import { config } from '../config/env';
 import prisma from '../config/database';
+import { repairJmlBookingAssetsFromNotesIfNeeded } from '../utils/jml-booking-assets-repair';
 
 const bookingRepo = new BookingRepository();
 const co2Service = new CO2Service();
@@ -372,6 +373,13 @@ export class BookingService {
     const booking = await bookingRepo.findById(id);
     if (!booking) {
       throw new NotFoundError('Booking', id);
+    }
+    if (booking.bookingType === 'jml' && !(booking.assets?.length)) {
+      const repaired = await repairJmlBookingAssetsFromNotesIfNeeded(id);
+      if (repaired) {
+        const refreshed = await bookingRepo.findById(id);
+        if (refreshed) return refreshed;
+      }
     }
     return booking;
   }
@@ -1178,12 +1186,12 @@ export class BookingService {
         } else if (newStatus === 'collected') {
           // Booking collected - job should be "collected" or "warehouse"
           // If job is already at warehouse or beyond, keep it; otherwise set to collected
-          // Leaver/breakfix: job goes courier_booked → dispatched → collected; do both steps when booking moves to collected
+          // Leaver/breakfix/mover (collection phase): job goes courier_booked → dispatched → collected; do both steps when booking moves to collected
           if (['warehouse', 'sanitised', 'graded', 'inventory', 'completed'].includes(job.status)) {
             targetJobStatus = null;
           } else if (
             bookingType === 'jml' &&
-            (jmlSubType === 'leaver' || jmlSubType === 'breakfix') &&
+            (jmlSubType === 'leaver' || jmlSubType === 'breakfix' || jmlSubType === 'mover') &&
             job.status === 'courier_booked'
           ) {
             // Two-step job update: courier_booked → dispatched → collected (skip syncing back to booking on first step)
@@ -1216,22 +1224,30 @@ export class BookingService {
         } else if (newStatus === 'device_allocated') {
           targetJobStatus = 'device_allocated';
         } else if (newStatus === 'courier_booked') {
-          targetJobStatus = 'courier_booked';
+          if (bookingType === 'jml' && jmlSubType === 'mover' && job.status === 'device_allocated') {
+            targetJobStatus = 'delivery_courier_booked';
+          } else {
+            targetJobStatus = 'courier_booked';
+          }
         } else if (newStatus === 'dispatched') {
-          targetJobStatus = 'dispatched';
+          if (bookingType === 'jml' && jmlSubType === 'mover' && job.status === 'delivery_courier_booked') {
+            targetJobStatus = 'delivery_dispatched';
+          } else {
+            targetJobStatus = 'dispatched';
+          }
         } else if (newStatus === 'delivered') {
           targetJobStatus = 'delivered';
         }
         // collection_scheduled: no job status change (job stays booked/courier_booked until collection)
 
-        // Leaver/breakfix: when booking moves courier_booked → collected, job must go courier_booked → dispatched → collected (two steps at once)
-        const isLeaverOrBreakfixCollected =
+        // Leaver/breakfix/mover: when booking moves to collected, job must go courier_booked → dispatched → collected (two steps at once)
+        const isLeaverBreakfixOrMoverCollected =
           newStatus === 'collected' &&
           bookingType === 'jml' &&
-          (jmlSubType === 'leaver' || jmlSubType === 'breakfix') &&
+          (jmlSubType === 'leaver' || jmlSubType === 'breakfix' || jmlSubType === 'mover') &&
           job.status === 'courier_booked';
 
-        if (isLeaverOrBreakfixCollected) {
+        if (isLeaverBreakfixOrMoverCollected) {
           const { JobService } = await import('./job.service');
           const jobService = new JobService();
           if (isValidJobTransitionForType('courier_booked', 'dispatched', bookingType, jmlSubType) &&
@@ -1265,6 +1281,57 @@ export class BookingService {
         }
       }
 
+    await this.markAllocatedClientInventoryDeliveredForBookingIfNeeded(
+      booking.id,
+      booking.status,
+      newStatus,
+      bookingType,
+      jmlSubType
+    );
+
     return this.getBookingById(booking.id);
+  }
+
+  /**
+   * When a JML booking reaches delivered (breakfix replacement) or is completed after delivered
+   * (new starter / mover), ensure client inventory rows for serials linked to the booking show status delivered.
+   */
+  private async markAllocatedClientInventoryDeliveredForBookingIfNeeded(
+    bookingId: string,
+    previousBookingStatus: BookingStatus,
+    newStatus: BookingStatus,
+    bookingType: 'itad_collection' | 'jml',
+    jmlSubType: string | null | undefined
+  ) {
+    if (bookingType !== 'jml' || !jmlSubType) return;
+
+    const shouldMark =
+      (newStatus === 'delivered' && jmlSubType === 'breakfix') ||
+      (newStatus === 'completed' &&
+        previousBookingStatus === 'delivered' &&
+        (jmlSubType === 'new_starter' || jmlSubType === 'mover'));
+
+    if (!shouldMark) return;
+
+    const { InventoryRepository } = await import('../repositories/inventory.repository');
+    const inventoryRepo = new InventoryRepository();
+
+    const b = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { tenantId: true },
+    });
+    if (!b?.tenantId) return;
+
+    const histories = await prisma.serialReuseHistory.findMany({
+      where: { bookingId },
+      select: { serialNumber: true },
+    });
+
+    for (const { serialNumber } of histories) {
+      const item = await inventoryRepo.findBySerial(b.tenantId, serialNumber);
+      if (item) {
+        await inventoryRepo.update(item.id, { status: 'delivered' });
+      }
+    }
   }
 }

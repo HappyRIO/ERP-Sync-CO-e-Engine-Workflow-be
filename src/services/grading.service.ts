@@ -19,6 +19,21 @@ export interface GradingRecordData {
   notes?: string;
   condition?: string; // conditionCode (frontend legacy naming)
   serialNumbers?: string[];
+  imeiNumbers?: string[];
+}
+
+function categoryRequiresImei(categoryName: string): boolean {
+  const c = String(categoryName || '')
+    .trim()
+    .toLowerCase();
+  return (
+    c === 'smart phones' ||
+    c === 'smart phone' ||
+    c === 'phone' ||
+    c === 'tablets' ||
+    c === 'tablet' ||
+    c === 'mobile'
+  );
 }
 
 const gradeConditionFactors: Record<string, number> = {
@@ -57,6 +72,7 @@ export class GradingService {
       notes: r.notes ?? undefined,
       condition: r.conditionCode ?? undefined,
       serialNumbers: r.serialNumbers ?? [],
+      imeiNumbers: r.imeiNumbers ?? [],
     } satisfies GradingRecordData));
   }
 
@@ -72,7 +88,8 @@ export class GradingService {
     condition?: string,
     notes?: string,
     quantity?: number,
-    serialNumbers?: string[]
+    serialNumbers?: string[],
+    imeiNumbers?: string[]
   ) {
     const booking = await bookingRepo.findById(bookingId);
     if (!booking) {
@@ -110,19 +127,35 @@ export class GradingService {
     const normalizedSerials = (serialNumbers ?? [])
       .map(s => String(s).trim())
       .filter(Boolean);
+    const normalizedImeis = (imeiNumbers ?? [])
+      .map(s => String(s).trim())
+      .filter(Boolean);
+
     if (['A', 'B', 'C'].includes(grade)) {
       if (normalizedSerials.length !== qty) {
         throw new ValidationError(`serialNumbers must contain exactly ${qty} values for grade ${grade}`);
       }
+    } else if (normalizedImeis.length > 0) {
+      throw new ValidationError('imeiNumbers are only used for grades A, B, and C');
     }
-    
+
     // Get category from database
     const category = jobAsset.category || await prisma.assetCategory.findUnique({
       where: { id: jobAsset.categoryId },
     });
-    
+
     if (!category) {
       throw new ValidationError(`Category not found for asset: ${assetId}`);
+    }
+
+    if (['A', 'B', 'C'].includes(grade) && categoryRequiresImei(category.name)) {
+      if (normalizedImeis.length !== qty) {
+        throw new ValidationError(
+          `imeiNumbers must contain exactly ${qty} value(s) for ${category.name} at grade ${grade}`
+        );
+      }
+    } else if (normalizedImeis.length > 0) {
+      throw new ValidationError('IMEI is only required for phone/tablet categories (grades A, B, C)');
     }
     
     // Use buybackFloor directly (same as new booking calculation)
@@ -166,6 +199,7 @@ export class GradingService {
         quantity: qty,
         conditionCode: condition ? String(condition).trim() : null,
         serialNumbers: normalizedSerials,
+        imeiNumbers: normalizedImeis,
         resaleValue: resaleValuePerUnit,
         gradedBy,
         notes: notes ? String(notes).trim() : null,
@@ -185,6 +219,7 @@ export class GradingService {
       notes,
       condition,
       serialNumbers: normalizedSerials,
+      imeiNumbers: normalizedImeis,
     } satisfies GradingRecordData;
   }
 

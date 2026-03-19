@@ -132,14 +132,14 @@ export async function syncAllStatuses() {
       const bookingType = booking.bookingType || 'itad_collection';
       const jmlSubType = booking.jmlSubType;
 
-      // Leaver/breakfix: when booking is collected and job is courier_booked, do two steps (dispatched → collected)
-      const isLeaverOrBreakfixCollected =
+      // Leaver/breakfix/mover (collection phase): when booking is collected and job is courier_booked, do two steps (dispatched → collected)
+      const isLeaverBreakfixOrMoverCollected =
         booking.status === 'collected' &&
         bookingType === 'jml' &&
-        (jmlSubType === 'leaver' || jmlSubType === 'breakfix') &&
+        (jmlSubType === 'leaver' || jmlSubType === 'breakfix' || jmlSubType === 'mover') &&
         job.status === 'courier_booked';
 
-      if (isLeaverOrBreakfixCollected) {
+      if (isLeaverBreakfixOrMoverCollected) {
         if (
           isValidJobTransitionForType('courier_booked', 'dispatched', bookingType, jmlSubType) &&
           isValidJobTransitionForType('dispatched', 'collected', bookingType, jmlSubType)

@@ -100,6 +100,20 @@ router.patch(
   bookingController.allocateDevice.bind(bookingController)
 );
 
+// Mover: allocate all devices linked to booking (admin only)
+router.post(
+  '/:id/allocate-mover-all',
+  requireAdmin,
+  bookingController.allocateMoverAll.bind(bookingController)
+);
+
+// Mover @ inventory: commit selected devices in one step (admin only)
+router.post(
+  '/:id/mover-commit-devices',
+  requireAdmin,
+  bookingController.commitMoverDevices.bind(bookingController)
+);
+
 // Update courier tracking (admin only)
 router.patch(
   '/:id/courier-tracking',

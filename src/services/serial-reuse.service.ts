@@ -2,7 +2,7 @@
 // Tracks serial number reuse history and calculates CO2 savings per serial
 
 import prisma from '../config/database';
-import { NotFoundError, ValidationError } from '../utils/errors';
+import { NotFoundError } from '../utils/errors';
 import { BookingType, JMLSubType } from '@prisma/client';
 
 export class SerialReuseService {
@@ -24,6 +24,15 @@ export class SerialReuseService {
 
     if (!booking) {
       throw new NotFoundError('Booking', bookingId);
+    }
+
+    // One allocation row per (booking, serial) — avoids duplicate history if allocate is retried.
+    const existingForBooking = await prisma.serialReuseHistory.findFirst({
+      where: { bookingId, serialNumber },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existingForBooking) {
+      return existingForBooking;
     }
 
     // Get current reuse count for this serial

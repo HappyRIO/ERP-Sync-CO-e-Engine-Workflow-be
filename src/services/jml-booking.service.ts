@@ -13,9 +13,13 @@ import { kmToMiles } from '../utils/co2';
 import { config } from '../config/env';
 import prisma from '../config/database';
 import { BookingStatus, BookingType, JMLSubType, JobStatus } from '@prisma/client';
-import { getNextValidBookingStatusesForType } from '../middleware/workflow';
+import { getNextValidBookingStatusesForType, isValidJobTransitionForType } from '../middleware/workflow';
 import { JobRepository } from '../repositories/job.repository';
 import { JobService } from './job.service';
+import {
+  isJmlAccessoryOnlyLabel,
+  resolveAssetCategoryForJmlDeviceLabel,
+} from '../utils/jml-asset-category';
 
 const bookingRepo = new BookingRepository();
 const jobRepo = new JobRepository();
@@ -34,6 +38,39 @@ async function syncJobStatusFromBooking(
   const job = await jobRepo.findByBookingId(bookingId);
   if (!job) {
     return;
+  }
+
+  // Leaver/breakfix/mover (collection phase): booking → collected while job is courier_booked → advance job in two steps (like booking.service)
+  if (newStatus === 'collected' && job.status === 'courier_booked') {
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { bookingType: true, jmlSubType: true },
+    });
+    const bookingType = (booking?.bookingType || 'itad_collection') as BookingType;
+    const jmlSubType = booking?.jmlSubType ?? null;
+    const needsTwoStep =
+      bookingType === 'jml' &&
+      (jmlSubType === 'leaver' || jmlSubType === 'breakfix' || jmlSubType === 'mover');
+    if (
+      needsTwoStep &&
+      isValidJobTransitionForType('courier_booked', 'dispatched', bookingType, jmlSubType) &&
+      isValidJobTransitionForType('dispatched', 'collected', bookingType, jmlSubType)
+    ) {
+      await jobService.updateStatus(
+        job.id,
+        'dispatched',
+        changedBy,
+        `Updated from booking status: ${newStatus} (step 1/2)`,
+        { skipSyncToBooking: true }
+      );
+      await jobService.updateStatus(
+        job.id,
+        'collected',
+        changedBy,
+        `Updated from booking status: ${newStatus} (step 2/2)`
+      );
+      return;
+    }
   }
 
   let targetJobStatus: JobStatus | null = null;
@@ -65,9 +102,30 @@ async function syncJobStatusFromBooking(
   } else if (newStatus === 'device_allocated') {
     targetJobStatus = 'device_allocated';
   } else if (newStatus === 'courier_booked') {
-    targetJobStatus = 'courier_booked';
+    const bookingRow = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { bookingType: true, jmlSubType: true },
+    });
+    const bType = (bookingRow?.bookingType || 'itad_collection') as BookingType;
+    const jSub = bookingRow?.jmlSubType ?? null;
+    // Mover delivery leg: job workflow uses delivery_courier_booked (not courier_booked)
+    if (bType === 'jml' && jSub === 'mover' && job.status === 'device_allocated') {
+      targetJobStatus = 'delivery_courier_booked' as JobStatus;
+    } else {
+      targetJobStatus = 'courier_booked';
+    }
   } else if (newStatus === 'dispatched') {
-    targetJobStatus = 'dispatched';
+    const bookingRow = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { bookingType: true, jmlSubType: true },
+    });
+    const bType = (bookingRow?.bookingType || 'itad_collection') as BookingType;
+    const jSub = bookingRow?.jmlSubType ?? null;
+    if (bType === 'jml' && jSub === 'mover' && job.status === 'delivery_courier_booked') {
+      targetJobStatus = 'delivery_dispatched' as JobStatus;
+    } else {
+      targetJobStatus = 'dispatched';
+    }
   } else if (newStatus === 'delivered') {
     targetJobStatus = 'delivered';
   } else if (newStatus === 'inventory') {
@@ -250,11 +308,8 @@ export class JMLBookingService {
     // Create BookingAsset records for devices
     if (data.devices && data.devices.length > 0) {
       for (const device of data.devices) {
-        // Find category by name
-        const category = await prisma.assetCategory.findFirst({
-          where: { name: device.category },
-        });
-
+        if (isJmlAccessoryOnlyLabel(device.category)) continue;
+        const category = await resolveAssetCategoryForJmlDeviceLabel(device.category);
         if (category) {
           await prisma.bookingAsset.create({
             data: {
@@ -484,11 +539,8 @@ export class JMLBookingService {
     // Create BookingAsset records for devices
     if (data.devices && data.devices.length > 0) {
       for (const device of data.devices) {
-        // Find category by name
-        const category = await prisma.assetCategory.findFirst({
-          where: { name: device.category },
-        });
-
+        if (isJmlAccessoryOnlyLabel(device.category)) continue;
+        const category = await resolveAssetCategoryForJmlDeviceLabel(device.category);
         if (category) {
           await prisma.bookingAsset.create({
             data: {
@@ -542,6 +594,15 @@ export class JMLBookingService {
     postcode: string;
     phone: string;
     siteName: string;
+    // Replacement device requirements (what admin allocates from inventory)
+    devices?: Array<{
+      category: string;
+      make: string;
+      model: string;
+      quantity: number;
+      deviceType: 'Windows' | 'Apple' | 'Android';
+      notes?: string;
+    }>;
     brokenDevices: Array<{
       category: string;
       make: string;
@@ -667,11 +728,8 @@ export class JMLBookingService {
     // Create BookingAsset records for broken devices
     if (data.brokenDevices && data.brokenDevices.length > 0) {
       for (const device of data.brokenDevices) {
-        // Find category by name
-        const category = await prisma.assetCategory.findFirst({
-          where: { name: device.category },
-        });
-
+        if (isJmlAccessoryOnlyLabel(device.category)) continue;
+        const category = await resolveAssetCategoryForJmlDeviceLabel(device.category);
         if (category) {
           await prisma.bookingAsset.create({
             data: {
@@ -685,11 +743,26 @@ export class JMLBookingService {
       }
     }
 
-    // Store device details in status history notes as JSON for retrieval
+    // Store BOTH replacement requirements (for admin allocation) and broken devices (for admin grading).
+    //
+    // - Grading.tsx expects device make/model under `Device details:` (currently implemented).
+    //   So for breakfix we keep `Device details:` tied to the broken devices being processed.
+    // - DeviceAllocation.tsx should use replacement requirements for allocating replacement devices,
+    //   so we store them under a separate marker: `Replacement Device details:`.
     const brokenDevicesInfo = data.brokenDevices
       .map(d => `${d.make} ${d.model} (x${d.quantity})`)
       .join(', ');
-    const deviceDetails = JSON.stringify(data.brokenDevices.map(d => ({
+
+    const replacementDevices = data.devices && data.devices.length > 0 ? data.devices : data.brokenDevices;
+    const brokenDeviceDetails = JSON.stringify(data.brokenDevices.map(d => ({
+      category: d.category,
+      make: d.make,
+      model: d.model,
+      quantity: d.quantity,
+      deviceType: d.deviceType,
+      notes: d.notes,
+    })));
+    const replacementDeviceDetails = JSON.stringify(replacementDevices.map(d => ({
       category: d.category,
       make: d.make,
       model: d.model,
@@ -700,7 +773,7 @@ export class JMLBookingService {
     await bookingRepo.addStatusHistory(booking.id, {
       status: 'pending',
       changedBy: data.createdBy,
-      notes: `Breakfix booking created - broken devices: ${brokenDevicesInfo}. Device details: ${deviceDetails}`,
+      notes: `Breakfix booking created - broken devices: ${brokenDevicesInfo}. Device details: ${brokenDeviceDetails}. Replacement Device details: ${replacementDeviceDetails}`,
     });
 
     // Create ERP order
@@ -910,11 +983,8 @@ export class JMLBookingService {
     // Create BookingAsset records for current devices
     if (data.currentDevices && data.currentDevices.length > 0) {
       for (const device of data.currentDevices) {
-        // Find category by name
-        const category = await prisma.assetCategory.findFirst({
-          where: { name: device.category },
-        });
-
+        if (isJmlAccessoryOnlyLabel(device.category)) continue;
+        const category = await resolveAssetCategoryForJmlDeviceLabel(device.category);
         if (category) {
           await prisma.bookingAsset.create({
             data: {
@@ -994,6 +1064,12 @@ export class JMLBookingService {
 
     if (booking.bookingType !== 'jml') {
       throw new ValidationError('Device allocation is only for JML bookings');
+    }
+
+    if (booking.jmlSubType === 'mover' && booking.status === 'inventory') {
+      throw new ValidationError(
+        'For mover bookings at inventory, select devices and use the single "Allocate Devices" action to commit all serials at once.'
+      );
     }
 
     // Allocate serial from inventory
@@ -1208,11 +1284,34 @@ export class JMLBookingService {
       ? `Courier: ${courierService}, Tracking: ${trackingNumber}`
       : `Courier tracking: ${trackingNumber}`;
 
-    await bookingRepo.update(booking.id, {
-      courierTracking: trackingNumber,
-      courierService: courierService,
-      status: nextStatus,
-    });
+    const isCollectionPhaseBook =
+      booking.status === 'created' &&
+      (booking.jmlSubType === 'leaver' || booking.jmlSubType === 'mover');
+    const isMoverDeliveryBook =
+      booking.jmlSubType === 'mover' && booking.status === 'device_allocated';
+
+    // Persist collection courier separately so mover delivery booking does not overwrite it
+    if (isCollectionPhaseBook) {
+      await bookingRepo.update(booking.id, {
+        collectionCourierTracking: trackingNumber,
+        collectionCourierService: courierService,
+        courierTracking: trackingNumber,
+        courierService: courierService,
+        status: nextStatus,
+      });
+    } else if (isMoverDeliveryBook) {
+      await bookingRepo.update(booking.id, {
+        courierTracking: trackingNumber,
+        courierService: courierService,
+        status: nextStatus,
+      });
+    } else {
+      await bookingRepo.update(booking.id, {
+        courierTracking: trackingNumber,
+        courierService: courierService,
+        status: nextStatus,
+      });
+    }
 
     if (nextStatus !== booking.status) {
       await bookingRepo.addStatusHistory(booking.id, {
@@ -1228,7 +1327,212 @@ export class JMLBookingService {
   }
 
   /**
-   * Mark booking as delivered (for new starter/breakfix outbound)
+   * Mover: allocate every mover_allocated device linked to this booking (moverSourceBookingId).
+   * Ignores device-requirement quantities; disposals etc. are not matched by count.
+   * @param options.advanceBookingStatus When false, links serials to the booking but keeps status at `inventory` (for admin review on Device Allocation page). When true (default), also moves to `device_allocated` once every linked row is allocated.
+   */
+  async allocateAllMoverDevicesForBooking(
+    bookingId: string,
+    allocatedBy: string,
+    options?: { advanceBookingStatus?: boolean }
+  ) {
+    const advanceBookingStatus = options?.advanceBookingStatus !== false;
+    const booking = await bookingRepo.findById(bookingId);
+
+    if (!booking) {
+      throw new NotFoundError('Booking', bookingId);
+    }
+    if (booking.bookingType !== 'jml' || booking.jmlSubType !== 'mover') {
+      throw new ValidationError('Automatic mover allocation is only for mover JML bookings');
+    }
+    if (booking.status !== 'inventory') {
+      throw new ValidationError(`Booking must be in inventory status. Current status: ${booking.status}`);
+    }
+    if (!booking.clientId) {
+      throw new ValidationError('Booking must have a client');
+    }
+
+    const items = await prisma.clientInventory.findMany({
+      where: {
+        tenantId: booking.tenantId,
+        status: 'mover_allocated',
+        allocatedTo: booking.clientId,
+        moverSourceBookingId: bookingId,
+      } as any,
+    });
+
+    if (items.length === 0) {
+      throw new ValidationError(
+        'No devices linked to this mover booking. Add devices from the booking Add to Inventory page (they must be tagged to this booking).'
+      );
+    }
+
+    const histories = await prisma.serialReuseHistory.findMany({
+      where: { bookingId },
+      select: { serialNumber: true },
+    });
+    const alreadyAllocated = new Set(histories.map((h) => h.serialNumber));
+
+    const allocatedSerialNumbers: string[] = [];
+
+    for (const item of items) {
+      if (alreadyAllocated.has(item.serialNumber)) {
+        continue;
+      }
+      await inventoryService.allocateSerial(bookingId, item.serialNumber);
+
+      const categoryName = item.category;
+      const category = categoryName
+        ? await prisma.assetCategory.findFirst({ where: { name: categoryName } })
+        : await prisma.assetCategory.findFirst({
+            where: {
+              name: { in: ['Laptop', 'Smart Phones', 'Desktop', 'Tablets', 'VOIP', 'WEEE Waste'] },
+            },
+          });
+      const co2ePerUnit = category?.co2ePerUnit ?? 250;
+
+      await serialReuseService.trackSerialReuse(
+        item.serialNumber,
+        bookingId,
+        booking.bookingType as BookingType,
+        booking.jmlSubType as JMLSubType | null,
+        co2ePerUnit
+      );
+      allocatedSerialNumbers.push(item.serialNumber);
+      alreadyAllocated.add(item.serialNumber);
+    }
+
+    const historiesAfter = await prisma.serialReuseHistory.findMany({
+      where: { bookingId },
+      select: { serialNumber: true },
+    });
+    const have = new Set(historiesAfter.map((h) => h.serialNumber));
+    const allSerials = items.map((i) => i.serialNumber);
+    const allLinkedAllocated = allSerials.every((s) => have.has(s));
+
+    const linkedSerialNumbers = historiesAfter.map((h) => h.serialNumber);
+
+    if (
+      advanceBookingStatus &&
+      booking.status === 'inventory' &&
+      allLinkedAllocated
+    ) {
+      const nextStatuses = getNextValidBookingStatusesForType(
+        booking.status,
+        booking.bookingType as BookingType,
+        booking.jmlSubType as JMLSubType | null
+      );
+      if (nextStatuses.includes('device_allocated')) {
+        await bookingRepo.update(booking.id, {
+          status: 'device_allocated',
+        });
+        await bookingRepo.addStatusHistory(booking.id, {
+          status: 'device_allocated',
+          changedBy: allocatedBy,
+          notes: `Devices auto-allocated: ${allSerials.join(', ')}`,
+        });
+        await syncJobStatusFromBooking(booking.id, 'device_allocated', allocatedBy);
+      }
+    }
+
+    return {
+      booking: await this.getBookingById(bookingId),
+      allocatedSerialNumbers,
+      quantity: allocatedSerialNumbers.length,
+      allMoverDevicesLinked: allLinkedAllocated,
+      linkedSerialNumbers,
+    };
+  }
+
+  /**
+   * Mover @ inventory: commit admin's device selection in one step (same totals as booking line items).
+   * Clears prior serial-reuse rows only for serials in this booking's mover inventory pool, then links the chosen serials.
+   */
+  async commitMoverSelectedDevices(bookingId: string, serialNumbers: string[], committedBy: string) {
+    const booking = await bookingRepo.findById(bookingId);
+    if (!booking) {
+      throw new NotFoundError('Booking', bookingId);
+    }
+    if (booking.bookingType !== 'jml' || booking.jmlSubType !== 'mover') {
+      throw new ValidationError('This action is only for mover JML bookings');
+    }
+    if (booking.status !== 'inventory') {
+      throw new ValidationError(`Booking must be in inventory status. Current status: ${booking.status}`);
+    }
+    if (!booking.clientId) {
+      throw new ValidationError('Booking must have a client');
+    }
+
+    const assets = await prisma.bookingAsset.findMany({ where: { bookingId } });
+    const expectedQty = assets.reduce((s, a) => s + a.quantity, 0);
+    const unique = [...new Set(serialNumbers.map((s) => s.trim()).filter(Boolean))];
+
+    if (expectedQty <= 0) {
+      throw new ValidationError('Booking has no device line items to allocate');
+    }
+    if (unique.length !== expectedQty) {
+      throw new ValidationError(`Select exactly ${expectedQty} device(s) for this booking (${unique.length} selected).`);
+    }
+
+    const poolRows = await prisma.clientInventory.findMany({
+      where: {
+        tenantId: booking.tenantId,
+        status: 'mover_allocated',
+        allocatedTo: booking.clientId,
+        moverSourceBookingId: bookingId,
+      } as any,
+      select: { serialNumber: true },
+    });
+    const poolSerials = [...new Set(poolRows.map((r) => r.serialNumber))];
+    if (poolSerials.length > 0) {
+      await prisma.serialReuseHistory.deleteMany({
+        where: { bookingId, serialNumber: { in: poolSerials } },
+      });
+    }
+
+    for (const sn of unique) {
+      await inventoryService.allocateSerial(bookingId, sn);
+      const inventoryItem = await prisma.clientInventory.findFirst({
+        where: { tenantId: booking.tenantId, serialNumber: sn },
+      });
+      const categoryName = inventoryItem?.category;
+      const category = categoryName
+        ? await prisma.assetCategory.findFirst({ where: { name: categoryName } })
+        : await prisma.assetCategory.findFirst({
+            where: {
+              name: { in: ['Laptop', 'Smart Phones', 'Desktop', 'Tablets', 'VOIP', 'WEEE Waste'] },
+            },
+          });
+      const co2ePerUnit = category?.co2ePerUnit ?? 250;
+      await serialReuseService.trackSerialReuse(
+        sn,
+        bookingId,
+        booking.bookingType as BookingType,
+        booking.jmlSubType as JMLSubType | null,
+        co2ePerUnit
+      );
+    }
+
+    await bookingRepo.update(booking.id, {
+      status: 'device_allocated',
+    });
+    await bookingRepo.addStatusHistory(booking.id, {
+      status: 'device_allocated',
+      changedBy: committedBy,
+      notes: `Allocated ${unique.length} device(s): ${unique.join(', ')}`,
+    });
+    await syncJobStatusFromBooking(booking.id, 'device_allocated', committedBy);
+
+    return {
+      booking: await this.getBookingById(bookingId),
+      allocatedSerialNumbers: unique,
+      quantity: unique.length,
+    };
+  }
+
+  /**
+   * Mark booking as delivered (for new starter/breakfix/mover outbound).
+   * Updates all devices allocated to this booking to inventory status 'delivered'.
    */
   async markDelivered(bookingId: string, deliveredBy: string) {
     const booking = await bookingRepo.findById(bookingId);
@@ -1249,6 +1553,20 @@ export class JMLBookingService {
     });
 
     await syncJobStatusFromBooking(booking.id, 'delivered', deliveredBy);
+
+    // Update all devices allocated to this booking to inventory status 'delivered'
+    const { InventoryRepository } = await import('../repositories/inventory.repository');
+    const inventoryRepo = new InventoryRepository();
+    const histories = await prisma.serialReuseHistory.findMany({
+      where: { bookingId: booking.id },
+      select: { serialNumber: true },
+    });
+    for (const { serialNumber } of histories) {
+      const item = await inventoryRepo.findBySerial(booking.tenantId, serialNumber);
+      if (item) {
+        await inventoryRepo.update(item.id, { status: 'delivered' });
+      }
+    }
 
     return this.getBookingById(bookingId);
   }

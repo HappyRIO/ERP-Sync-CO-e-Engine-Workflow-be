@@ -5,6 +5,8 @@ import prisma from '../config/database';
 
 const inventoryService = new InventorySyncService();
 
+const ALLOWED_INVENTORY_STATUSES = ['available', 'allocated', 'delivered', 'mover_allocated'] as const;
+
 export class InventoryController {
   /**
    * GET /api/inventory
@@ -124,7 +126,13 @@ export class InventoryController {
         allocatedTo = providedClientId || null;
       }
 
-      const result = await inventoryService.bulkCreateInventory(allocatedTo, items, req.user.tenantId);
+      const { sourceBookingId } = req.body as { sourceBookingId?: string };
+      const result = await inventoryService.bulkCreateInventory(
+        allocatedTo,
+        items,
+        req.user.tenantId,
+        typeof sourceBookingId === 'string' && sourceBookingId ? sourceBookingId : null
+      );
 
       return res.status(201).json({
         success: true,
@@ -176,6 +184,47 @@ export class InventoryController {
       return res.json({
         success: true,
         data: result,
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * GET /api/inventory/mover-allocated
+   * Get mover-allocated inventory for a client (for mover booking device allocation).
+   * Query: clientId (required), bookingId (recommended for mover — scopes pool per booking), category?, conditionCode?
+   */
+  async getMoverAllocated(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { clientId, bookingId, category, conditionCode } = req.query;
+      if (!clientId || typeof clientId !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'clientId is required',
+        } as ApiResponse);
+      }
+
+      const sourceBookingId = typeof bookingId === 'string' && bookingId ? bookingId : undefined;
+
+      const inventory = await inventoryService.getMoverAllocatedInventory(
+        clientId,
+        req.user.tenantId,
+        category as string | undefined,
+        conditionCode as string | undefined,
+        sourceBookingId
+      );
+
+      return res.json({
+        success: true,
+        data: inventory,
       } as ApiResponse);
     } catch (error) {
       return next(error);
@@ -243,6 +292,13 @@ export class InventoryController {
       const { id } = req.params;
       const { make, model, imei, conditionCode, status } = req.body;
 
+      if (status !== undefined && !ALLOWED_INVENTORY_STATUSES.includes(status as any)) {
+        return res.status(400).json({
+          success: false,
+          error: `Status must be one of: ${ALLOWED_INVENTORY_STATUSES.join(', ')}`,
+        } as ApiResponse);
+      }
+
       const { InventoryRepository } = await import('../repositories/inventory.repository');
       const repo = new (InventoryRepository as any)();
 
@@ -254,7 +310,7 @@ export class InventoryController {
         } as ApiResponse);
       }
 
-      // Check permissions - clients can only update their own inventory
+      // Check permissions - clients can only update their own allocated inventory
       if (req.user.role === 'client') {
         const client = await prisma.client.findFirst({
           where: {
@@ -262,7 +318,7 @@ export class InventoryController {
             email: req.user.email,
           },
         });
-        if (!client || client.id !== inventory.clientId) {
+        if (!client || client.id !== (inventory as any).allocatedTo) {
           return res.status(403).json({
             success: false,
             error: 'Forbidden',

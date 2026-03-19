@@ -243,9 +243,9 @@ const bookingWorkflows: Record<BookingType, Record<JMLSubType | 'default', Recor
       created: ['collection_scheduled', 'cancelled'], // Skip scheduled, go directly to collection_scheduled
       scheduled: [],
       collected: ['warehouse'], // Mover: collected old device → warehouse
-      warehouse: ['inventory'], // Mover: warehouse → inventory (skip sanitised and graded)
+      warehouse: ['graded'], // Mover: grade at warehouse (no sanitised booking status)
       sanitised: [],
-      graded: [],
+      graded: ['inventory'],
       inventory: ['device_allocated'], // After old device processed, allocate new device
       device_allocated: ['courier_booked', 'cancelled'], // New device allocated
       courier_booked: ['dispatched', 'cancelled'], // New device courier booked
@@ -443,7 +443,9 @@ const jobWorkflows: Record<BookingType, Record<JMLSubType | 'default', Record<Jo
       courier_booked: ['dispatched', 'cancelled'],
       dispatched: ['collected', 'cancelled'], // Courier picks up old device
       collected: ['warehouse'], // Mover: collected old device → warehouse
-      warehouse: ['inventory'], // Mover: warehouse → inventory (skip sanitised and graded)
+      warehouse: ['graded'],
+      sanitised: [],
+      graded: ['inventory'],
       inventory: ['device_allocated'], // After old device processed, allocate new device
       device_allocated: ['delivery_courier_booked', 'cancelled'], // New device allocated, book courier for delivery
       delivery_courier_booked: ['delivery_dispatched', 'cancelled'], // Delivery courier booked
@@ -454,8 +456,6 @@ const jobWorkflows: Record<BookingType, Record<JMLSubType | 'default', Record<Jo
       routed: [],
       en_route: [],
       arrived: [],
-      sanitised: [],
-      graded: [],
     },
     breakfix: {
       // Breakfix: New Starter first (deliver replacement), then Leaver (collect broken device)
@@ -588,7 +588,7 @@ export function getBookingStatusSequence(
       default: [], // JML default (not used)
       new_starter: ['pending', 'created', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
       leaver: ['pending', 'created', 'collection_scheduled', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
-      mover: ['pending', 'created', 'collection_scheduled', 'collected', 'warehouse', 'inventory', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
+      mover: ['pending', 'created', 'collection_scheduled', 'collected', 'warehouse', 'graded', 'inventory', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
       breakfix: ['pending', 'created', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
     },
   };
@@ -623,7 +623,7 @@ export function getJobStatusSequence(
       default: [], // JML default (not used)
       new_starter: ['booked', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'completed'],
       leaver: ['booked', 'courier_booked', 'dispatched', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
-      mover: ['booked', 'courier_booked', 'dispatched', 'collected', 'warehouse', 'inventory', 'device_allocated', 'delivery_courier_booked', 'delivery_dispatched', 'delivered', 'completed'],
+      mover: ['booked', 'courier_booked', 'dispatched', 'collected', 'warehouse', 'graded', 'inventory', 'device_allocated', 'delivery_courier_booked', 'delivery_dispatched', 'delivered', 'completed'],
       breakfix: ['booked', 'device_allocated', 'courier_booked', 'dispatched', 'delivered', 'collected', 'warehouse', 'sanitised', 'graded', 'inventory', 'completed'],
     },
   };

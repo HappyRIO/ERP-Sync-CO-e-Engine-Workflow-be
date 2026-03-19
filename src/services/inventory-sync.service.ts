@@ -2,7 +2,7 @@
 // Handles synchronization with ReuseOS ERP and local inventory management
 
 import { InventoryRepository } from '../repositories/inventory.repository';
-import { mockERPService, ERPInventoryItem } from './mock-erp.service';
+import { mockERPService } from './mock-erp.service';
 import { ValidationError, NotFoundError } from '../utils/errors';
 import prisma from '../config/database';
 import { InventoryStatus } from '@prisma/client';
@@ -176,10 +176,24 @@ export class InventorySyncService {
   }
 
   /**
-   * Get available inventory for allocation
+   * Get available inventory for allocation (status available).
    */
   async getAvailableInventory(allocatedTo: string | null, tenantId: string, category?: string, conditionCode?: string) {
     return inventoryRepo.findAvailable(allocatedTo, tenantId, category, conditionCode);
+  }
+
+  /**
+   * Get mover-allocated inventory for a client (for mover booking device allocation).
+   * Only items with status mover_allocated and allocatedTo = clientId.
+   */
+  async getMoverAllocatedInventory(
+    clientId: string,
+    tenantId: string,
+    category?: string,
+    conditionCode?: string,
+    sourceBookingId?: string
+  ) {
+    return inventoryRepo.findMoverAllocated(clientId, tenantId, category, conditionCode, sourceBookingId);
   }
 
   /**
@@ -190,7 +204,9 @@ export class InventorySyncService {
   }
 
   /**
-   * Allocate serial number to a booking
+   * Allocate serial number to a booking.
+   * - New starter / breakfix: item must be available → set status to 'allocated'.
+   * - Mover: item must be mover_allocated and allocatedTo === booking.clientId (no status change).
    */
   async allocateSerial(bookingId: string, serialNumber: string) {
     const booking = await prisma.booking.findUnique({
@@ -206,22 +222,37 @@ export class InventorySyncService {
       throw new ValidationError('Booking must have a client to allocate inventory');
     }
 
-    // Find inventory item
     const inventoryItem = await inventoryRepo.findBySerial(booking.tenantId, serialNumber);
-
     if (!inventoryItem) {
       throw new NotFoundError('Inventory item', serialNumber);
     }
 
-    if (inventoryItem.status !== 'available') {
-      throw new ValidationError(`Inventory item ${serialNumber} is not available (status: ${inventoryItem.status})`);
-    }
+    const isMover = booking.jmlSubType === 'mover';
 
-    // Update inventory status - allocatedTo stores the clientId
-    await inventoryRepo.update(inventoryItem.id, {
-      status: 'allocated',
-      allocatedTo: booking.clientId,
-    });
+    if (isMover) {
+      // Mover: only devices that are mover_allocated to this client can be allocated
+      if (inventoryItem.status !== 'mover_allocated' || inventoryItem.allocatedTo !== booking.clientId) {
+        throw new ValidationError(
+          `Inventory item ${serialNumber} is not available for this mover booking. Only devices with status mover_allocated for this client can be allocated.`
+        );
+      }
+      const src = (inventoryItem as any).moverSourceBookingId as string | null | undefined;
+      if (src && src !== bookingId) {
+        throw new ValidationError(
+          `Inventory item ${serialNumber} is linked to a different mover booking.`
+        );
+      }
+      // No status update – device stays mover_allocated until delivered
+    } else {
+      // New starter / breakfix: must be available, then set to allocated
+      if (inventoryItem.status !== 'available') {
+        throw new ValidationError(`Inventory item ${serialNumber} is not available (status: ${inventoryItem.status})`);
+      }
+      await inventoryRepo.update(inventoryItem.id, {
+        status: 'allocated',
+        allocatedTo: booking.clientId,
+      });
+    }
 
     // Allocate in ReuseOS ERP (if booking has ERP order number)
     if (booking.erpJobNumber) {
@@ -291,10 +322,13 @@ export class InventorySyncService {
       conditionCode: string;
       status?: string;
     }>,
-    tenantId: string
+    tenantId: string,
+    moverSourceBookingId?: string | null
   ) {
+    const allowedStatuses: InventoryStatus[] = ['available', 'allocated', 'delivered', 'mover_allocated'];
     const inventoryItems = items.map(item => {
-      const status = (item.status as InventoryStatus) || 'available';
+      const raw = (item.status as string) || 'available';
+      const status = allowedStatuses.includes(raw as InventoryStatus) ? (raw as InventoryStatus) : 'available';
       
       return {
         tenantId,
@@ -307,7 +341,9 @@ export class InventorySyncService {
         conditionCode: item.conditionCode,
         status,
         // If status is allocated and allocatedTo is provided, use it; otherwise null
-        allocatedTo: (status === 'allocated' && allocatedTo) ? allocatedTo : null,
+        allocatedTo: (status === 'allocated' || status === 'mover_allocated') && allocatedTo ? allocatedTo : null,
+        moverSourceBookingId:
+          status === 'mover_allocated' && moverSourceBookingId ? moverSourceBookingId : null,
       };
     });
 

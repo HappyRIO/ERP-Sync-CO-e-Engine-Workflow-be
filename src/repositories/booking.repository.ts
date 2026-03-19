@@ -137,6 +137,8 @@ export class BookingRepository {
     deviceType?: string;
     courierTracking?: string;
     courierService?: string;
+    collectionCourierTracking?: string | null;
+    collectionCourierService?: string | null;
     deliveryDate?: Date;
   }) {
     // Build update data, ensuring status is properly typed as Prisma enum

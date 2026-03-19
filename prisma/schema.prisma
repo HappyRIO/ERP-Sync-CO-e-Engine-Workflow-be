@@ -132,8 +132,10 @@ enum JMLSubType {
 enum InventoryStatus {
   available
   allocated
-  in_transit
   delivered
+  mover_allocated
+  // Legacy (kept for existing data; new logic uses only the four above)
+  in_transit
   collected
   warehouse
 }
@@ -235,12 +237,16 @@ model Booking {
   employeePhone          String?       // For JML bookings
   startDate              DateTime?     // For new starter (min 5 days)
   deviceType             String?       // Windows/Apple for new starter
-  courierTracking        String?       // Tracking number
+  courierTracking        String?       // Tracking number (delivery / current leg for mover)
   courierService         String?       // Courier service name (FedEx, DPD, UPS, etc.)
+  // Mover/leaver: first courier (collection) kept when booking delivery courier is booked later
+  collectionCourierTracking String?
+  collectionCourierService  String?
   deliveryDate           DateTime?     // When delivered/collected
 
   // Relations
   assets                 BookingAsset[]
+  moverLinkedInventory   ClientInventory[] @relation("MoverBookingInventory")
   statusHistory          BookingStatusHistory[]
   documents              Document[]             @relation("BookingDocuments")
   serialReuseHistory     SerialReuseHistory[]
@@ -436,6 +442,7 @@ model GradingRecord {
   quantity         Int
   conditionCode    String?
   serialNumbers    String[]    @default([])
+  imeiNumbers      String[]    @default([]) // Required for phone/tablet when grade A/B/C (inventory)
   resaleValue      Float       // per-unit resale value
   gradedBy         String
   notes            String?
@@ -747,6 +754,8 @@ model ClientInventory {
   erpInventoryId  String?          // Reference to ReuseOS inventory ID
   status          InventoryStatus  @default(available)
   allocatedTo     String?          // Client ID if allocated to a client
+  moverSourceBookingId String?     // Mover: inventory rows added for this booking (scopes mover_allocated pool per booking)
+  moverSourceBooking   Booking?   @relation("MoverBookingInventory", fields: [moverSourceBookingId], references: [id], onDelete: SetNull)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   lastSyncedAt    DateTime?        // Last sync with ReuseOS
@@ -758,6 +767,7 @@ model ClientInventory {
   @@index([conditionCode])
   @@index([erpInventoryId])
   @@index([allocatedTo])
+  @@index([moverSourceBookingId])
 }
 
 // Serial Reuse History (track CO2 savings per serial number)

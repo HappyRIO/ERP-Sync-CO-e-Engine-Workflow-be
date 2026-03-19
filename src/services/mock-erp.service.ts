@@ -210,7 +210,7 @@ class MockERPService {
   /**
    * Sync client inventory from ReuseOS ERP
    */
-  async syncInventory(clientId: string): Promise<ERPInventorySyncResponse> {
+  async syncInventory(_clientId: string): Promise<ERPInventorySyncResponse> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -225,7 +225,7 @@ class MockERPService {
   /**
    * Get inventory from ReuseOS ERP for a client
    */
-  async getInventory(clientId: string): Promise<ERPInventoryItem[]> {
+  async getInventory(_clientId: string): Promise<ERPInventoryItem[]> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 400));
 
@@ -237,7 +237,7 @@ class MockERPService {
    * Allocate inventory items in ReuseOS ERP
    * Called when device is allocated to a booking
    */
-  async allocateInventory(request: ERPAllocationRequest): Promise<void> {
+  async allocateInventory(_request: ERPAllocationRequest): Promise<void> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -250,7 +250,7 @@ class MockERPService {
    * Create incoming inventory order in ReuseOS ERP
    * Called when leaver items are collected and received at warehouse
    */
-  async createIncomingOrder(request: ERPIncomingOrderRequest): Promise<ERPOrderResponse> {
+  async createIncomingOrder(_request: ERPIncomingOrderRequest): Promise<ERPOrderResponse> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 400));
 

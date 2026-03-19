@@ -457,6 +457,7 @@ export class BookingController {
         postcode,
         phone,
         siteName,
+        devices,
         brokenDevices,
         deviceType,
         lat,
@@ -469,6 +470,11 @@ export class BookingController {
           error: 'brokenDevices array is required and must not be empty',
         } as ApiResponse);
       }
+
+      // Replacement devices (what admin allocates from inventory)
+      // If not provided yet (older clients), fall back to brokenDevices to avoid hard failures.
+      const replacementDevices =
+        devices && Array.isArray(devices) && devices.length > 0 ? devices : brokenDevices;
 
       // For client role, don't pass clientId (service will find/create Client)
       // For admin/reseller, use provided clientId
@@ -485,6 +491,7 @@ export class BookingController {
         postcode,
         phone,
         siteName,
+        devices: replacementDevices,
         brokenDevices,
         deviceType,
         lat,
@@ -646,6 +653,86 @@ export class BookingController {
           booking: transformedBooking,
           allocatedSerialNumbers: [serialNumber],
           quantity: 1,
+        },
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/:id/allocate-mover-all
+   * Mover: allocate all mover_allocated inventory rows linked to this booking (auto, no quantity rules)
+   */
+  async allocateMoverAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const advanceBookingStatus =
+        req.body && typeof req.body === 'object' && 'advanceBookingStatus' in req.body
+          ? req.body.advanceBookingStatus !== false
+          : true;
+      const result = await jmlBookingService.allocateAllMoverDevicesForBooking(id, req.user.userId, {
+        advanceBookingStatus,
+      });
+      const transformedBooking = transformBookingForAPI(result.booking as any);
+
+      return res.json({
+        success: true,
+        data: {
+          booking: transformedBooking,
+          allocatedSerialNumbers: result.allocatedSerialNumbers,
+          quantity: result.quantity,
+          allMoverDevicesLinked: result.allMoverDevicesLinked,
+          linkedSerialNumbers: result.linkedSerialNumbers,
+        },
+      } as ApiResponse);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/bookings/:id/mover-commit-devices
+   * Mover @ inventory: commit selected serials in one step (admin only)
+   */
+  async commitMoverDevices(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        } as ApiResponse);
+      }
+
+      const { id } = req.params;
+      const serialNumbers = Array.isArray(req.body?.serialNumbers) ? req.body.serialNumbers : null;
+      if (!serialNumbers || serialNumbers.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'serialNumbers array is required',
+        } as ApiResponse);
+      }
+
+      const result = await jmlBookingService.commitMoverSelectedDevices(
+        id,
+        serialNumbers.map((s: unknown) => String(s)),
+        req.user.userId
+      );
+      const transformedBooking = transformBookingForAPI(result.booking as any);
+
+      return res.json({
+        success: true,
+        data: {
+          booking: transformedBooking,
+          allocatedSerialNumbers: result.allocatedSerialNumbers,
+          quantity: result.quantity,
         },
       } as ApiResponse);
     } catch (error) {

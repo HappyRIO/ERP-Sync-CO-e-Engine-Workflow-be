@@ -45,6 +45,8 @@ export interface TransformedBooking {
   deviceType?: string;
   courierTracking?: string;
   courierService?: string;
+  collectionCourierTracking?: string;
+  collectionCourierService?: string;
   deliveryDate?: string;
   // Mover booking specific fields
   currentAddress?: string;
@@ -195,6 +197,8 @@ export function transformBookingForAPI(booking: any): TransformedBooking {
     deviceType: booking.deviceType,
     courierTracking: booking.courierTracking,
     courierService: booking.courierService,
+    collectionCourierTracking: (booking as any).collectionCourierTracking ?? undefined,
+    collectionCourierService: (booking as any).collectionCourierService ?? undefined,
     deliveryDate: booking.deliveryDate instanceof Date
       ? booking.deliveryDate.toISOString()
       : booking.deliveryDate,

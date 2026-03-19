@@ -17,6 +17,9 @@ router.post('/upload', (req, res, next) => inventoryController.upload(req, res, 
 // POST /api/inventory/sync - Sync with ReuseOS
 router.post('/sync', (req, res, next) => inventoryController.sync(req, res, next));
 
+// GET /api/inventory/mover-allocated - Get mover-allocated inventory for a client
+router.get('/mover-allocated', (req, res, next) => inventoryController.getMoverAllocated(req, res, next));
+
 // GET /api/inventory/available - Get available inventory
 router.get('/available', (req, res, next) => inventoryController.getAvailable(req, res, next));
 

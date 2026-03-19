@@ -62,6 +62,36 @@ export class InventoryRepository {
     });
   }
 
+  /**
+   * Find inventory items that are mover_allocated to a client (for mover booking device allocation).
+   */
+  /**
+   * Mover device pool for allocation. When sourceBookingId is set, only rows added for that booking are returned.
+   */
+  async findMoverAllocated(
+    clientId: string,
+    tenantId: string,
+    category?: string,
+    conditionCode?: string,
+    sourceBookingId?: string
+  ) {
+    const where: any = {
+      tenantId,
+      status: 'mover_allocated',
+      allocatedTo: clientId,
+    };
+    if (sourceBookingId) {
+      where.moverSourceBookingId = sourceBookingId;
+    }
+    if (category) where.category = category;
+    if (conditionCode) where.conditionCode = conditionCode;
+    return prisma.clientInventory.findMany({
+      where,
+      include: { tenant: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async findAll(allocatedTo: string | null | undefined, tenantId: string, category?: string, conditionCode?: string, status?: string) {
     const where: any = {
       tenantId,

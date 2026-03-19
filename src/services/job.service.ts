@@ -848,7 +848,7 @@ export class JobService {
 
   /**
    * Update job status.
-   * @param options.skipSyncToBooking - When true, do not sync job status back to booking (used when doing intermediate steps e.g. leaver/breakfix courier_booked → dispatched → collected).
+   * @param options.skipSyncToBooking - When true, do not sync job status back to booking (used when doing intermediate steps e.g. leaver/breakfix/mover courier_booked → dispatched → collected).
    */
   async updateStatus(
     jobId: string,
